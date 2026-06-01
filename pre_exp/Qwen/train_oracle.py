@@ -1,6 +1,6 @@
 import os
 # ==========================================
-# 0. 显式指定单卡运行环境与显存优化 (必须在第一行)
+# 0. 显式指定单卡运行环境与显存优化
 # ==========================================
 os.environ["CUDA_VISIBLE_DEVICES"] = "7"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
@@ -12,8 +12,7 @@ from transformers import (
     AutoTokenizer, 
     TrainingArguments, 
     Trainer, 
-    DataCollatorForSeq2Seq,
-    BitsAndBytesConfig
+    DataCollatorForSeq2Seq
 )
 from peft import LoraConfig, get_peft_model
 
@@ -31,45 +30,40 @@ MERGED_DIR = "./outputs/Oracle_Model_Merged"
 MAX_SEQ_LEN = 2048
 BATCH_SIZE = 4            
 GRAD_ACCUM_STEPS = 8      # Effective Batch Size = 32
-LEARNING_RATE = 2e-5
+LEARNING_RATE = 2e-5      # 采用较保守的学习率求稳
 EPOCHS = 1
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(MERGED_DIR, exist_ok=True)
 
 # ==========================================
-# 2. 加载 Tokenizer 与 模型 (修复废弃与正则警告)
+# 2. 加载 Tokenizer 与 模型 (移除 8-bit 量化，采用纯 BF16)
 # ==========================================
 print("📦 正在加载 Tokenizer 与 模型...")
 tokenizer = AutoTokenizer.from_pretrained(
     MODEL_PATH, 
     trust_remote_code=True,
-    fix_mistral_regex=True  # 💡 顺手补上之前测试阶段提示的正则修复，防止分词器切错代码符号
+    fix_mistral_regex=True  # 修复正则警告
 )
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 
-# 配置 bitsandbytes 8-bit 量化
-quantization_config = BitsAndBytesConfig(
-    load_in_8bit=True,
-    llm_int8_threshold=6.0,
-    llm_int8_has_fp16_weight=False,
-)
-
+# 直接使用纯 bfloat16 加载，速度最快，融合最安全
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_PATH,
-    quantization_config=quantization_config, 
-    dtype=torch.bfloat16, 
+    torch_dtype=torch.bfloat16, # 修正了原先的 dtype
+    device_map="auto",
     trust_remote_code=True
 )
 
 # ==========================================
-# 3. 稳健的数据预处理 (💡 核心修正：适配真实列名)
+# 3. 稳健的数据预处理
 # ==========================================
 print("📝 正在处理数据集并执行标签掩码 (-100)...")
 dataset = load_dataset(DATASET_PATH, split="train")
 
 def preprocess_function(example):
+    # 按照 Qwen ChatML 格式拼接，结尾加上 <|im_end|>
     prompt_text = f"<|im_start|>user\n{example['instruction']}<|im_end|>\n<|im_start|>assistant\n"
     response_text = f"{example['output']}<|im_end|>\n"
 
@@ -77,7 +71,7 @@ def preprocess_function(example):
     prompt_ids = tokenizer(prompt_text, add_special_tokens=False).input_ids
     response_ids = tokenizer(response_text, add_special_tokens=False).input_ids
 
-    # 拼接与掩码
+    # 拼接与掩码：只对 assistant 回复部分计算 Loss
     input_ids = prompt_ids + response_ids
     labels = [-100] * len(prompt_ids) + response_ids
 
@@ -92,7 +86,7 @@ def preprocess_function(example):
         "attention_mask": [1] * len(input_ids)
     }
 
-# 批量处理，移除原有的所有旧列（包括 instruction 和 response）
+# 批量处理，移除原有的所有旧列
 train_dataset = dataset.map(
     preprocess_function, 
     remove_columns=dataset.column_names,
@@ -115,6 +109,8 @@ model = get_peft_model(model, peft_config)
 
 if hasattr(model, "enable_input_require_grads"):
     model.enable_input_require_grads()
+else:
+    model.get_input_embeddings().register_forward_hook(lambda m, i, o: o.requires_grad_(True))
 
 model.print_trainable_parameters()
 
@@ -131,6 +127,7 @@ training_args = TrainingArguments(
     num_train_epochs=EPOCHS,
     bf16=True, 
     gradient_checkpointing=True, 
+    max_grad_norm=0.5,         # 💡 【极其重要】防爆救生圈，防止 BF16 梯度飞坡导致模型脑死亡
     logging_steps=10,
     save_strategy="no", 
     report_to="none" 
@@ -148,17 +145,18 @@ trainer = Trainer(
 # ==========================================
 # 6. 启动训练与权重融合
 # ==========================================
-print(" 开始训练 Oracle 模型 ...")
+print("🚀 开始训练 Oracle 模型 ...")
 trainer.train()
 
 print("⏳ 训练完成！正在将 LoRA 权重融合进主干网络...")
 del trainer
 torch.cuda.empty_cache()
 
+# 此时直接 Merge 将非常顺滑，因为是在纯 BF16 环境下
 merged_model = model.merge_and_unload()
 
 print(f"💾 正在保存完整的 Oracle 模型至 {MERGED_DIR}...")
 merged_model.save_pretrained(MERGED_DIR, safe_serialization=True)
 tokenizer.save_pretrained(MERGED_DIR)
 
-print("✅ 准备就绪。")
+print("✅ 第一阶段 Oracle 上限模型准备就绪。")
