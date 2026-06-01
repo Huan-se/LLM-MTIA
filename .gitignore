@@ -1,0 +1,9 @@
+models/
+outputs/
+datasets/
+data/
+weights/
+_pycache_/
+*.pt
+*.pth
+*.bin

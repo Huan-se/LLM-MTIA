@@ -1,0 +1,20 @@
+{
+    "data_dir": "./data",
+    "weights_dir": "./weights",
+    "batch_size": 64,
+    "num_workers": 2,
+    "num_priv_classes": 51,
+    "num_pub_classes": 51,
+    
+    "target_lr": 0.001,
+    "target_epochs": 50,
+    
+    "step1_lr": 0.001,
+    "step1_epochs": 50,
+    
+    "step2_lr": 0.0001,
+    "step2_epochs": 5,
+    "alpha_sad": 0.5,
+    
+    "device": "cuda"
+}
