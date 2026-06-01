@@ -40,16 +40,18 @@ else:
         
         prompt_text = f"<|im_start|>user\n{instruction_text}<|im_end|>\n<|im_start|>assistant\n"
         inputs = tokenizer(prompt_text, return_tensors="pt").to(model.device)
+        # 获取终止符 ID
+        im_end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
         
         with torch.no_grad():
             outputs = model.generate(
                 **inputs, 
                 max_new_tokens=512, 
-                do_sample=False, # 贪心解码，移除 temperature 以消除警告
-                eos_token_id=tokenizer.eos_token_id,
+                do_sample=False,
+                eos_token_id=[tokenizer.eos_token_id, im_end_id], 
                 pad_token_id=tokenizer.eos_token_id
             )
-        
+            
         # 截取生成的纯代码部分
         generated = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
         

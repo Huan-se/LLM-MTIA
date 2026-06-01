@@ -1,0 +1,8 @@
+nohup: ignoring input
+📦 加载模型和 Tokenizer...
+`torch_dtype` is deprecated! Use `dtype` instead!
+📝 加载测试数据...
+🚀 开始生成测试集代码 (具有断点保护)...
+  0%|          | 0/200 [00:00<?, ?it/s]/home/intern01sjh/miniconda3/envs/llm/lib/python3.10/site-packages/bitsandbytes/autograd/_functions.py:316: UserWarning: MatMul8bitLt: inputs will be cast from torch.bfloat16 to float16 during quantization
+  warnings.warn(f"MatMul8bitLt: inputs will be cast from {A.dtype} to float16 during quantization")
+  0%|          | 1/200 [01:31<5:04:31, 91.82s/it]  1%|          | 2/200 [03:03<5:02:58, 91.81s/it]  2%|▏         | 3/200 [04:35<5:01:44, 91.90s/it]  2%|▏         | 4/200 [06:06<4:58:58, 91.53s/it]  2%|▎         | 5/200 [07:37<4:57:14, 91.46s/it]  3%|▎         | 6/200 [09:09<4:55:26, 91.37s/it]  4%|▎         | 7/200 [09:49<3:59:53, 74.58s/it]  4%|▍         | 8/200 [11:19<4:14:31, 79.54s/it]
