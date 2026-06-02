@@ -9,7 +9,7 @@ from transformers import (
 from peft import LoraConfig, get_peft_model
 from codebleu import calc_codebleu
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "6"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 # ==========================================
@@ -117,10 +117,10 @@ class MTIA_AlignTrainer(Trainer):
         loss_vr = F.kl_div(rel_dummy, rel_suffix, reduction="batchmean")
 
         # 归一化后的科学配比权重
-        alpha = 0.1     
+        alpha = 0.2     
         gamma = 0.1     
         lam = 0.005     
-        beta = 20.0     
+        beta = 5.0    
 
         total_loss = alpha * loss_ce + gamma * loss_entropy + lam * loss_vr + beta * loss_anchor
 
@@ -143,36 +143,36 @@ trainer = MTIA_AlignTrainer(
 print("🚀 开始 Phase 3 动态对齐训练...")
 trainer.train()
 
-# # ==========================================
-# # 5. 评估 CodeBLEU 
-# # ==========================================
-# print("📊 训练结束，开始在私有数据集上评估 Ours CodeBLEU...")
-# model.eval()
-# test_dataset = load_dataset(PRIVATE_DATASET, split="train").select(range(70000, 70200))
+# ==========================================
+# 5. 评估 CodeBLEU 
+# ==========================================
+print("📊 训练结束，开始在私有数据集上评估 Ours CodeBLEU...")
+model.eval()
+test_dataset = load_dataset(PRIVATE_DATASET, split="train").select(range(70000, 70200))
 
-# preds, refs = [], []
-# for example in test_dataset:
-#     q = example.get('problem', example.get('instruction', ''))
-#     a = example.get('solution', example.get('output', ''))
-#     inputs = tokenizer(f"<|im_start|>user\n{q}<|im_end|>\n<|im_start|>assistant\n", return_tensors="pt").to(model.device)
+preds, refs = [], []
+for example in test_dataset:
+    q = example.get('problem', example.get('instruction', ''))
+    a = example.get('solution', example.get('output', ''))
+    inputs = tokenizer(f"<|im_start|>user\n{q}<|im_end|>\n<|im_start|>assistant\n", return_tensors="pt").to(model.device)
     
-#     with torch.no_grad():
-#         outputs = model.generate(
-#             **inputs, max_new_tokens=512, do_sample=False, 
-#             repetition_penalty=1.1,
-#             eos_token_id=[tokenizer.eos_token_id, im_end_id],
-#             pad_token_id=tokenizer.eos_token_id
-#         )
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs, max_new_tokens=512, do_sample=False, 
+            repetition_penalty=1.1,
+            eos_token_id=[tokenizer.eos_token_id, im_end_id],
+            pad_token_id=tokenizer.eos_token_id
+        )
         
-#     generated_code = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=False)
-#     generated_code = generated_code.split("<|im_end|>")[0].strip()
-#     generated_code = generated_code.replace("```python", "").replace("```", "").strip()
+    generated_code = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=False)
+    generated_code = generated_code.split("<|im_end|>")[0].strip()
+    generated_code = generated_code.replace("```python", "").replace("```", "").strip()
     
-#     preds.append(generated_code)
-#     refs.append(a)
+    preds.append(generated_code)
+    refs.append(a)
 
-# result = calc_codebleu(refs, preds, lang="python", weights=(0.25,0.25,0.25,0.25), tokenizer=None)
-# print(f"=== Phase 3 Proposed CodeBLEU: {result['codebleu'] * 100:.2f} ===")
+result = calc_codebleu(refs, preds, lang="python", weights=(0.25,0.25,0.25,0.25), tokenizer=None)
+print(f"=== Phase 3 Proposed CodeBLEU: {result['codebleu'] * 100:.2f} ===")
 
 # ==========================================
 # 6. 保存最终对齐模型
