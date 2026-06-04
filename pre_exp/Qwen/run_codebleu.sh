@@ -11,7 +11,7 @@ if [ -z "$1" ]; then
 fi
 
 PHASE=$1
-GPU_ID="2" # 默认使用显卡2，你可以在这里统一修改
+GPU_ID="7" # 默认使用显卡2，你可以在这里统一修改
 
 # 创建存放评测结果的文件夹
 mkdir -p ./outputs/eval_results

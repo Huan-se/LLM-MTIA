@@ -5,12 +5,13 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer, DataCollatorForSeq2Seq
 from peft import LoraConfig, get_peft_model
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "7"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 # === 继承 Phase 2 模型，使用 Magpie 代理数据 ===
 BASE_MODEL_PATH = "./models/Qwen2.5-Coder-1.5B"
-BASELINE_MERGED_PATH = "./outputs/Phase2_Baseline_Merged" 
+BASELINE_MERGED_PATH = "./outputs/Phase2_Baseline_Merged"
+# BASELINE_MERGED_PATH = "./outputs/Oracle_Model_Merged"  
 PROXY_DATASET = "./datasets/Magpie-Qwen2.5-Pro-Filtered"
 
 MAX_SEQ_LEN = 1024 
@@ -92,11 +93,11 @@ class MTIA_AlignTrainer(Trainer):
         rel_suffix = F.softmax(torch.matmul(H_s_norm, H_s_norm.transpose(-1, -2)) / 0.1, dim=-1)
         loss_vr = F.kl_div(rel_dummy, rel_suffix, reduction="batchmean")
 
-        alpha, gamma, lam, beta = 0.1, 0.1, 0.005, 20.0     
+        alpha, gamma, lam, beta = 0.2, 0.1, 0.001, 10.0     
         total_loss = alpha * loss_ce + gamma * loss_entropy + lam * loss_vr + beta * loss_anchor
 
         if self.state.global_step % 20 == 0:
-            print(f"\n[Step {self.state.global_step}] Total: {total_loss.item():.3f} (CE:{alpha*loss_ce.item():.3f}|VR:{lam*loss_vr.item():.3f})")
+            print(f"\n[Step {self.state.global_step}] Total: {total_loss.item():.3f} (CE:{alpha*loss_ce.item():.3f}|Entr:{gamma*loss_entropy.item():.3f}|VR:{lam*loss_vr.item():.3f}|Anc:{beta*loss_anchor.item():.3f})")
 
         return (total_loss, outputs) if return_outputs else total_loss
 

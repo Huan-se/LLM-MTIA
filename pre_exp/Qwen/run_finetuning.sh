@@ -1,5 +1,5 @@
 #!/bin/bash
-
+set -e  
 # 检查是否传入了参数
 if [ -z "$1" ]; then
     echo "❌ 错误: 未指定训练阶段。"
@@ -18,14 +18,17 @@ case $PHASE in
     1)
         echo "🔥 正在启动 Phase 1: Oracle 上限模型微调..."
         python -u train_oracle.py
+        ./run_codebleu.sh 1
         ;;
     2)
         echo "🔥 正在启动 Phase 2: Baseline 基线模型微调..."
         python -u train_baseline.py
+        ./run_codebleu.sh 2
         ;;
     3)
         echo "🔥 正在启动 Phase 3: Proposed 动态自适应对齐微调..."
         python -u train_align.py
+        ./run_codebleu.sh 3
         ;;
     *)
         echo "❌ 错误: 无效的参数 '$PHASE'"

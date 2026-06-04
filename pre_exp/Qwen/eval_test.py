@@ -9,12 +9,10 @@ from tqdm import tqdm
 from codebleu import calc_codebleu
 
 # ==========================================
-# 💡 核心功能：正则化代码提取器
+# 1. 核心功能：正则化代码提取器
 # ==========================================
 def extract_pure_code(text):
-    """
-    提取纯净代码，剔除 Markdown 标记以及模型多余的自然语言废话。
-    """
+    """提取纯净代码，剔除 Markdown 标记以及模型多余的自然语言废话"""
     pattern = r"```[a-zA-Z]*\n(.*?)```"
     match = re.search(pattern, text, re.DOTALL)
     if match: 
@@ -28,58 +26,91 @@ def extract_pure_code(text):
             
     return cleaned_text.strip()
 
+# ==========================================
+# 2. 核心功能：动态模型构建工厂
+# ==========================================
+def build_model(args, tokenizer):
+    """根据 mode 参数动态构建内存结构，避免资源浪费"""
+    if args.mode == "base":
+        print(f"📦 正在加载 [纯基座模型]: {args.base_model_path}")
+        model = AutoModelForCausalLM.from_pretrained(
+            args.base_model_path, 
+            torch_dtype=torch.bfloat16, 
+            device_map="auto"
+        )
+        return model
+        
+    elif args.mode == "spliced":
+        if not args.suffix_model_path:
+            raise ValueError("在 spliced 模式下，必须提供 --suffix_model_path 参数！")
+            
+        print("📦 正在 CPU 上执行模型拼接 (Base Prefix + Finetuned Suffix)...")
+        # 1. 先在 CPU 上以 bfloat16 加载两个模型以节省显存
+        base_model = AutoModelForCausalLM.from_pretrained(args.base_model_path, torch_dtype=torch.bfloat16)
+        suffix_model = AutoModelForCausalLM.from_pretrained(args.suffix_model_path, torch_dtype=torch.bfloat16)
+        
+        # 2. 物理缝合 Layer 4~27, norm, 以及 lm_head
+        for i in range(4, len(base_model.model.layers)):
+            base_model.model.layers[i] = suffix_model.model.layers[i]
+        base_model.model.norm = suffix_model.model.norm
+        base_model.lm_head = suffix_model.lm_head
+        
+        # 3. 释放后缀模型内存
+        del suffix_model
+        
+        # 4. 手动推入 GPU
+        print("🚀 拼接完成，正在将缝合模型推入 GPU...")
+        base_model = base_model.cuda()
+        return base_model
+        
+    else:
+        raise ValueError(f"不支持的模式: {args.mode}")
 
+# ==========================================
+# 3. 主评估流程
+# ==========================================
 def main():
-    parser = argparse.ArgumentParser(description="Universal CodeBLEU Evaluator")
-    parser.add_argument("--model_path", type=str, required=True, help="Path to the merged model directory")
-    parser.add_argument("--dataset_path", type=str, default="./datasets/Magicoder-OSS-Instruct", help="Path to the private test dataset")
-    parser.add_argument("--output_json", type=str, default=None, help="Path to save or read generation results")
-    parser.add_argument("--gpu_id", type=str, default="2", help="CUDA_VISIBLE_DEVICES index")
+    parser = argparse.ArgumentParser(description="Comparative CodeBLEU Evaluator")
+    parser.add_argument("--mode", type=str, choices=["base", "spliced"], required=True, help="评估模式：纯基座(base) 或 拼接模型(spliced)")
+    parser.add_argument("--base_model_path", type=str, default="./models/Qwen2.5-Coder-1.5B", help="基座模型路径")
+    parser.add_argument("--suffix_model_path", type=str, default=None, help="提供微调后缀的模型路径 (仅 spliced 模式需要)")
+    parser.add_argument("--dataset_path", type=str, default="./datasets/Magicoder-OSS-Instruct", help="私有测试数据集路径")
+    parser.add_argument("--output_json", type=str, default=None, help="结果保存路径")
+    parser.add_argument("--gpu_id", type=str, default="6", help="CUDA_VISIBLE_DEVICES index")
     args = parser.parse_args()
 
+    # 缓存直连逻辑
     predictions = []
     references = []
-
-    # ==========================================
-    # 1. 断点缓存直连逻辑：如果 JSON 存在，直接跳过模型加载！
-    # ==========================================
+    
     if args.output_json and os.path.exists(args.output_json):
-        print(f"✅ 发现已有的生成结果文件 {args.output_json}，跳过模型推理，直接加载计算 CodeBLEU！")
+        print(f"✅ 发现已有的生成结果文件 {args.output_json}，跳过模型推理！")
         with open(args.output_json, "r", encoding="utf-8") as f:
             results_cache = json.load(f)
-            
         for res in results_cache:
             predictions.append(res.get("pure_extracted_code", ""))
-            # 💡 注意：读取缓存时，我们直接获取预先存好的 ground_truth
             references.append(res.get("ground_truth", ""))
-            
-        if len(predictions) == 0 or len(references) == 0:
-            print("⚠️ 警告：读取到的缓存文件为空或格式不匹配。请删除旧 JSON 文件后重新运行。")
-            return
-            
     else:
-        # ==========================================
-        # 2. 常规推理流程：加载模型并生成
-        # ==========================================
+        # 配置环境
         os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
         os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-        print(f"📦 正在加载模型和 Tokenizer: {args.model_path}")
-        tokenizer = AutoTokenizer.from_pretrained(args.model_path, trust_remote_code=True, fix_mistral_regex=True)
+        # 准备 Tokenizer
+        tokenizer = AutoTokenizer.from_pretrained(args.base_model_path, trust_remote_code=True, fix_mistral_regex=True)
         if tokenizer.pad_token is None: tokenizer.pad_token = tokenizer.eos_token
         im_end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
 
-        model = AutoModelForCausalLM.from_pretrained(args.model_path, torch_dtype=torch.bfloat16, device_map="auto")
+        # 构建并加载模型
+        model = build_model(args, tokenizer)
         model.eval()
 
         print(f"📝 加载测试数据: {args.dataset_path}")
         dataset = load_dataset(args.dataset_path, split="train")
-        # 统一取最后的 200 条作为私有测试集
-        test_dataset = dataset.select(range(len(dataset)-200, len(dataset))) 
+        test_dataset = dataset.select(range(70000, 70200)) # 固定测试集范围保证公平比对
 
         results_cache = []
 
-        print("🚀 开始代码生成与正则提取净化...")
+        print(f"🚀 开始在 {args.mode} 模式下生成代码与提取...")
         for example in tqdm(test_dataset):
             instruction_text = example.get('problem', example.get('instruction', ''))
             ground_truth_text = example.get('solution', example.get('output', ''))
@@ -107,26 +138,22 @@ def main():
             if args.output_json:
                 results_cache.append({
                     "instruction": instruction_text, 
-                    "ground_truth": pure_reference,      # 💡 将纯净参考代码存入 JSON，保证读取时可用
+                    "ground_truth": pure_reference, 
                     "raw_generated": raw_generated_text, 
                     "pure_extracted_code": pure_code
                 })
 
-        # 落盘保存
         if args.output_json:
             os.makedirs(os.path.dirname(args.output_json), exist_ok=True)
             with open(args.output_json, "w", encoding="utf-8") as f:
                 json.dump(results_cache, f, ensure_ascii=False, indent=2)
-            print(f"💾 详细生成结果已保存至 {args.output_json}")
 
-    # ==========================================
-    # 3. 详细分项输出 (还原你的原始习惯)
-    # ==========================================
+    # 详细分项输出
     print("📊 正在计算 CodeBLEU...")
     result = calc_codebleu(references, predictions, lang="python", weights=(0.25, 0.25, 0.25, 0.25), tokenizer=None)
     
     print("\n" + "="*50)
-    print(f"📉 评估模型: {os.path.basename(args.model_path)}")
+    print(f"📉 评估模式: {args.mode.upper()}")
     print(f"=== 总分 (CodeBLEU): {result['codebleu'] * 100:.2f} ===")
     print(f"- N-gram 匹配: {result['ngram_match_score'] * 100:.2f}")
     print(f"- 关键词匹配 : {result['weighted_ngram_match_score'] * 100:.2f}")
