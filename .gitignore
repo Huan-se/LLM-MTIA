@@ -4,6 +4,7 @@ datasets/
 data/
 weights/
 _pycache_/
+resultsx/
 *.pt
 *.pth
 *.bin

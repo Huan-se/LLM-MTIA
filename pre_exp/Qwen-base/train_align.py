@@ -5,7 +5,7 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer, DataCollatorForSeq2Seq
 from peft import LoraConfig, get_peft_model
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "7"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 # === 继承 Phase 2 模型，使用 Magpie 代理数据 ===
@@ -16,7 +16,7 @@ PROXY_DATASET = "./datasets/Magpie-Qwen2.5-Pro-Filtered"
 
 MAX_SEQ_LEN = 1024 
 OUTPUT_DIR = "./outputs/Phase3_Proposed"
-MERGED_SAVE_DIR = "./outputs/Phase3_Proposed_Merged"
+MERGED_SAVE_DIR = "./outputs/Phase3_Proposed_Merged_2_0_0_0"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(MERGED_SAVE_DIR, exist_ok=True)
 
@@ -93,7 +93,7 @@ class MTIA_AlignTrainer(Trainer):
         rel_suffix = F.softmax(torch.matmul(H_s_norm, H_s_norm.transpose(-1, -2)) / 0.1, dim=-1)
         loss_vr = F.kl_div(rel_dummy, rel_suffix, reduction="batchmean")
 
-        alpha, gamma, lam, beta = 0.2, 0.1, 0.001, 10.0     
+        alpha, gamma, lam, beta = 0.2 ,0, 0, 0 
         total_loss = alpha * loss_ce + gamma * loss_entropy + lam * loss_vr + beta * loss_anchor
 
         if self.state.global_step % 20 == 0:
