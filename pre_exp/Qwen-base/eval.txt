@@ -1,0 +1,55 @@
+nohup: ignoring input
+==================================================
+🔍 开始批量扫描目录: ./search_outputs
+💻 使用显卡: GPU 0
+==================================================
+⏳ 正在评估: align_a0.0_g0.1_l0.0_b5.0_base_merged
+   日志保存至: ./search_outputs/eval_feature_logs/align_a0.0_g0.1_l0.0_b5.0_base_merged_features.log
+✅ align_a0.0_g0.1_l0.0_b5.0_base_merged 评估完成！
+--------------------------------------------------
+⏳ 正在评估: align_a0.0_g0.1_l0.0_b5.0_phase2_merged
+   日志保存至: ./search_outputs/eval_feature_logs/align_a0.0_g0.1_l0.0_b5.0_phase2_merged_features.log
+✅ align_a0.0_g0.1_l0.0_b5.0_phase2_merged 评估完成！
+--------------------------------------------------
+⏳ 正在评估: align_a0.0_g0.2_l0.0_b5.0_base_merged
+   日志保存至: ./search_outputs/eval_feature_logs/align_a0.0_g0.2_l0.0_b5.0_base_merged_features.log
+✅ align_a0.0_g0.2_l0.0_b5.0_base_merged 评估完成！
+--------------------------------------------------
+⏳ 正在评估: align_a0.0_g0.2_l0.0_b5.0_phase2_merged
+   日志保存至: ./search_outputs/eval_feature_logs/align_a0.0_g0.2_l0.0_b5.0_phase2_merged_features.log
+✅ align_a0.0_g0.2_l0.0_b5.0_phase2_merged 评估完成！
+--------------------------------------------------
+⏳ 正在评估: align_a0.0_g0.4_l0.0_b5.0_base_merged
+   日志保存至: ./search_outputs/eval_feature_logs/align_a0.0_g0.4_l0.0_b5.0_base_merged_features.log
+✅ align_a0.0_g0.4_l0.0_b5.0_base_merged 评估完成！
+--------------------------------------------------
+⏳ 正在评估: align_a0.0_g0.4_l0.0_b5.0_phase2_merged
+   日志保存至: ./search_outputs/eval_feature_logs/align_a0.0_g0.4_l0.0_b5.0_phase2_merged_features.log
+✅ align_a0.0_g0.4_l0.0_b5.0_phase2_merged 评估完成！
+--------------------------------------------------
+⏳ 正在评估: align_a0.0_g0.8_l0.0_b5.0_base_merged
+   日志保存至: ./search_outputs/eval_feature_logs/align_a0.0_g0.8_l0.0_b5.0_base_merged_features.log
+✅ align_a0.0_g0.8_l0.0_b5.0_base_merged 评估完成！
+--------------------------------------------------
+⏳ 正在评估: align_a0.0_g0.8_l0.0_b5.0_phase2_merged
+   日志保存至: ./search_outputs/eval_feature_logs/align_a0.0_g0.8_l0.0_b5.0_phase2_merged_features.log
+✅ align_a0.0_g0.8_l0.0_b5.0_phase2_merged 评估完成！
+--------------------------------------------------
+⏳ 正在评估: align_a0.0_g1.0_l0.0_b0.0_phase2_merged
+   日志保存至: ./search_outputs/eval_feature_logs/align_a0.0_g1.0_l0.0_b0.0_phase2_merged_features.log
+✅ align_a0.0_g1.0_l0.0_b0.0_phase2_merged 评估完成！
+--------------------------------------------------
+⏳ 正在评估: align_a0.0_g1.0_l0.0_b5.0_base_merged
+   日志保存至: ./search_outputs/eval_feature_logs/align_a0.0_g1.0_l0.0_b5.0_base_merged_features.log
+✅ align_a0.0_g1.0_l0.0_b5.0_base_merged 评估完成！
+--------------------------------------------------
+⏳ 正在评估: align_a0.0_g1.6_l0.0_b5.0_base_merged
+   日志保存至: ./search_outputs/eval_feature_logs/align_a0.0_g1.6_l0.0_b5.0_base_merged_features.log
+✅ align_a0.0_g1.6_l0.0_b5.0_base_merged 评估完成！
+--------------------------------------------------
+⏳ 正在评估: align_a0.0_g1.6_l0.0_b5.0_phase2_merged
+   日志保存至: ./search_outputs/eval_feature_logs/align_a0.0_g1.6_l0.0_b5.0_phase2_merged_features.log
+✅ align_a0.0_g1.6_l0.0_b5.0_phase2_merged 评估完成！
+--------------------------------------------------
+🎉 批量特征评估与敏感度测试已全部结束！
+你可以使用 cat ./search_outputs/eval_feature_logs/*.log | grep -E '评估目标|MSE|Cosine|变化量敏感度' 快速查看结果。

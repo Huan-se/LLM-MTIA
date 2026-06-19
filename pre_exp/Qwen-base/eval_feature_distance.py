@@ -30,7 +30,9 @@ def main():
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_id
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-    tokenizer = AutoTokenizer.from_pretrained(args.oracle_model_path, trust_remote_code=True)
+    print("📦 正在加载 Tokenizer...")
+    # 💡 核心修复：添加 fix_mistral_regex=True 消灭警告
+    tokenizer = AutoTokenizer.from_pretrained(args.oracle_model_path, trust_remote_code=True, fix_mistral_regex=True)
     if tokenizer.pad_token is None: tokenizer.pad_token = tokenizer.eos_token
 
     print("📦 正在加载 Oracle (目标) 与待评估模型...")
@@ -45,17 +47,22 @@ def main():
 
     print("🚀 开始特征提取与距离计算...")
     for i in tqdm(range(0, len(test_dataset), args.batch_size)):
-        batch_data = test_dataset[i : i + args.batch_size]
+        
+        # 💡 核心修复：不使用切片返回字典，而是逐条取出 example 并装入列表，完美兼容万能提取器
+        batch_examples = [test_dataset[k] for k in range(i, min(i + args.batch_size, len(test_dataset)))]
         
         prompts = []
-        for j in range(len(batch_data.get('instruction', batch_data.get('problem', ['']*args.batch_size)))):
-            q = batch_data.get('instruction', batch_data.get('problem', ['']*args.batch_size))[j]
-            a = batch_data.get('output', batch_data.get('solution', ['']*args.batch_size))[j]
-            # 兼容 messages 格式
-            if not q and 'messages' in batch_data:
-                msgs = batch_data['messages'][j]
+        for example in batch_examples:
+            q = example.get('instruction', example.get('problem', example.get('prompt', example.get('input', example.get('query', '')))))
+            a = example.get('output', example.get('solution', example.get('response', '')))
+            
+            if not q and 'messages' in example:
+                msgs = example['messages']
                 q = msgs[0]['content'] if len(msgs) > 0 else ''
                 a = msgs[1]['content'] if len(msgs) > 1 else ''
+                
+            if not q:
+                print(f"\n🚨 严重警告: 无法在当前数据条目中找到指令字段！该数据的键名为: {list(example.keys())}")
             
             prompts.append(f"<|im_start|>user\n{q}<|im_end|>\n<|im_start|>assistant\n{a}<|im_end|>\n")
             
@@ -78,6 +85,10 @@ def main():
             total_cos += F.cosine_similarity(H_eval_valid, H_oracle_valid, dim=-1).mean().item()
             total_cka += compute_linear_cka(H_eval_valid.to(torch.float32), H_oracle_valid.to(torch.float32))
             valid_batches += 1
+
+    if valid_batches == 0:
+        print("❌ 错误：没有成功提取到任何有效的特征批次，请检查数据读取！")
+        return
 
     avg_mse = total_mse / valid_batches
     avg_cos = total_cos / valid_batches

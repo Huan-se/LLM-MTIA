@@ -5,8 +5,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments,
 from peft import LoraConfig, get_peft_model
 
 # 环境配置
-os.environ["CUDA_VISIBLE_DEVICES"] = "0" # 请根据实际情况修改
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0" # 请根据实际情况修改
+# os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 # 路径配置
 MODEL_PATH = "./models/Qwen2.5-1.5B-Base"
@@ -45,14 +45,18 @@ test_dataset = dataset.select(
 )
 
 def preprocess_function(example):
-    # 兼容 OpenCodeInstruct 可能存在的不同字段命名
-    q = example.get('instruction', example.get('problem', ''))
-    a = example.get('output', example.get('solution', ''))
-    
+    # 新代码：终极万能字段提取
+    q = example.get('instruction', example.get('problem', example.get('prompt', example.get('input', example.get('query', '')))))
+    a = example.get('output', example.get('solution', example.get('response', '')))
+
     if not q and 'messages' in example:
         msgs = example['messages']
         q = msgs[0]['content'] if len(msgs) > 0 else ''
         a = msgs[1]['content'] if len(msgs) > 1 else ''
+
+    # ⚠️ 加上这个安全锁，如果实在找不到列名，会在终端大声报警并打印所有的键名！
+    if not q:
+        print(f"\n🚨 严重警告: 无法在当前数据条目中找到指令字段！该数据的键名为: {list(example.keys())}")
 
     prompt_text = f"<|im_start|>user\n{q}<|im_end|>\n<|im_start|>assistant\n"
     response_text = f"{a}<|im_end|>\n"

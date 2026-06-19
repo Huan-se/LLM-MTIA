@@ -4,8 +4,8 @@ from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer, DataCollatorForSeq2Seq
 from peft import LoraConfig, get_peft_model
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+# os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 # === 路径配置 ===
 BASE_MODEL_PATH = "./models/Qwen2.5-1.5B-Base"
@@ -50,13 +50,18 @@ print("📝 处理公有代理数据集...")
 dataset = load_dataset(PROXY_DATASET, split="train")
 
 def preprocess(example):
-    # 万能解析，适配 Magicoder 的 problem/solution 或 instruction/response
-    q = example.get('instruction', example.get('problem', example.get('prompt', '')))
-    a = example.get('response', example.get('output', example.get('solution', '')))
+    # 新代码：终极万能字段提取
+    q = example.get('instruction', example.get('problem', example.get('prompt', example.get('input', example.get('query', '')))))
+    a = example.get('output', example.get('solution', example.get('response', '')))
+
     if not q and 'messages' in example:
         msgs = example['messages']
         q = msgs[0]['content'] if len(msgs) > 0 else ''
         a = msgs[1]['content'] if len(msgs) > 1 else ''
+
+    # ⚠️ 加上这个安全锁，如果实在找不到列名，会在终端大声报警并打印所有的键名！
+    if not q:
+        print(f"\n🚨 严重警告: 无法在当前数据条目中找到指令字段！该数据的键名为: {list(example.keys())}")
 
     p_ids = tokenizer(f"<|im_start|>user\n{q}<|im_end|>\n<|im_start|>assistant\n", add_special_tokens=False).input_ids
     r_ids = tokenizer(f"{a}<|im_end|>\n", add_special_tokens=False).input_ids
