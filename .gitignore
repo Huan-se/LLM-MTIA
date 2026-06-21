@@ -5,6 +5,7 @@ data/
 weights/
 _pycache_/
 resultsx/
+results*/
 *.pt
 *.pth
 *.bin

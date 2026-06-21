@@ -135,7 +135,10 @@ def main():
         savefolder += f'-{args.tbs_changevar}'
     if args.init is not None:
         savefolder += f'-{args.init}'
-        init_fn = getattr(torch, args.init)
+        if args.init in ['randn', 'rand', 'ones', 'zeros']:
+            init_fn = getattr(torch, args.init)
+        else:
+            init_fn = None
     else:
         init_fn = torch.ones if args.attack in ['ts', 'tbs'] else torch.zeros
     
@@ -189,7 +192,13 @@ def main():
     surrogate_model.eval()
     surrogate_model.requires_grad_(False) 
     
-    tokenizer = AutoTokenizer.from_pretrained(target_llm_path)
+    # 增加兼容 Mistral 架构分词器的安全加载逻辑
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(target_llm_path, fix_mistral_regex=True)
+    except TypeError:
+        # 如果模型不是 Mistral 架构，不支持该参数，则回退到普通加载
+        tokenizer = AutoTokenizer.from_pretrained(target_llm_path)
+        
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
@@ -281,8 +290,22 @@ def main():
         B = inputdict['input_ids'].shape[0]
         M = inputdict['input_ids'].shape[1]
         N = opt_weight_matrix.shape[0]
-        rweight = init_fn((B, M, N), requires_grad=True, device=args.device, dtype=torch_dtype) 
+        # ======== 核心修改：支持高级初始化分布 ========
+        if args.init in ['randn', 'rand', 'ones', 'zeros']:
+            rweight = getattr(torch, args.init)((B, M, N), device=args.device, dtype=torch_dtype)
+        else:
+            rweight = torch.ones((B, M, N), device=args.device, dtype=torch_dtype)
+            if args.init == 'xav_uni':
+                torch.nn.init.xavier_uniform_(rweight)
+            elif args.init == 'xav_norm':
+                torch.nn.init.xavier_normal_(rweight)
+            elif args.init == 'he_norm':
+                torch.nn.init.kaiming_normal_(rweight)
+        
+        # 恢复梯度追踪并进行基础缩放
+        rweight.requires_grad = True
         rweight.data /= N
+        # ==============================================
         optimizer = optimizer_class([rweight], lr=args.lr, weight_decay=args.wd_l2)
 
         change_var_fn_name, fn_multiplier = args.tbs_changevar.split(':')

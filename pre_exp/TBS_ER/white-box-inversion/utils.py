@@ -14,6 +14,7 @@ from transformers.modeling_outputs import CausalLMOutput
 import transformers
 import copy
 import numpy as np
+import pandas as pd  # 新增：用于读取 parquet 文件
 
 from transformers import AutoTokenizer, AutoModel
 
@@ -64,50 +65,68 @@ def get_basis_vectors(embedding_weight, logger):
 
 def get_list_invert_text(dataset):
     random.seed(0)
-    dataset_path_json = os.path.join(DATASET_PATH, f'{dataset}.json')
-    dataset_path_jsonl = os.path.join(DATASET_PATH, f'{dataset}.jsonl')
+    # 兼容传入目录名或具体文件名
+    dataset_base_path = os.path.join(DATASET_PATH, dataset)
+    dataset_path_json = f"{dataset_base_path}.json"
+    dataset_path_jsonl = f"{dataset_base_path}.jsonl"
     
-    target_path = None
-    if os.path.exists(dataset_path_json):
-        target_path = dataset_path_json
-    elif os.path.exists(dataset_path_jsonl):
-        target_path = dataset_path_jsonl
-    else:
-        raise FileNotFoundError(f"未找到数据集文件: 尝试了 {dataset_path_json} 和 {dataset_path_jsonl}")
-        
     texts = []
-    if target_path.endswith('.jsonl'):
-        with open(target_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                if not line.strip(): continue
-                data = json.loads(line)
-                text = data.get('instruction', data.get('prompt', data.get('text', data.get('problem', ''))))
-                if text:
-                    texts.append(text)
-    else:
-        with open(target_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        if isinstance(data, dict) and 'text' in data:
-            texts = data['text']
-        elif isinstance(data, list):
-            for item in data:
-                if isinstance(item, dict):
-                     text = item.get('instruction', item.get('prompt', item.get('text', item.get('problem', ''))))
-                     if text: texts.append(text)
-                elif isinstance(item, str):
-                     texts.append(item)
     
-    if not texts:
-        try:
+    # 核心修改：如果是目录，则尝试寻找并读取 parquet 文件
+    if os.path.isdir(dataset_base_path):
+        parquet_files = sorted([os.path.join(dataset_base_path, f) for f in os.listdir(dataset_base_path) if f.endswith('.parquet')])
+        if not parquet_files:
+            raise FileNotFoundError(f"目录 {dataset_base_path} 中未找到任何 .parquet 文件。")
+        
+        # 读取第一个分片的数据（通常足够用于预实验提取几十条 top 长度文本）
+        target_file = parquet_files[0]
+        df = pd.read_parquet(target_file)
+        
+        possible_cols = ['instruction', 'prompt', 'text', 'problem', 'question', 'input']
+        text_col = next((col for col in possible_cols if col in df.columns), None)
+        
+        if text_col:
+            texts = df[text_col].dropna().astype(str).tolist()
+        else:
+             raise ValueError(f"Parquet 文件 {target_file} 未能找到有效的文本指令列。当前包含列: {list(df.columns)}")
+             
+    # 保留原有的 json/jsonl 读取逻辑
+    elif os.path.exists(dataset_path_json) or os.path.exists(dataset_path_jsonl):
+        target_path = dataset_path_json if os.path.exists(dataset_path_json) else dataset_path_jsonl
+        if target_path.endswith('.jsonl'):
             with open(target_path, 'r', encoding='utf-8') as f:
                 for line in f:
-                    if line.strip():
-                        first_obj = json.loads(line)
-                        keys_info = list(first_obj.keys())
-                        break
-        except Exception:
-            keys_info = "无法解析首行键名"
-        raise ValueError(f"未能从 {target_path} 中解析出文本。首行数据的实际键名为: {keys_info}。请检查并修改 utils.py 的提取逻辑。")
+                    if not line.strip(): continue
+                    data = json.loads(line)
+                    text = data.get('instruction', data.get('prompt', data.get('text', data.get('problem', data.get('input', '')))))
+                    if text:
+                        texts.append(text)
+        else:
+            with open(target_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict) and 'text' in data:
+                texts = data['text']
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                         text = item.get('instruction', item.get('prompt', item.get('text', item.get('problem', item.get('input', '')))))
+                         if text: texts.append(text)
+                    elif isinstance(item, str):
+                         texts.append(item)
+        
+        if not texts:
+            try:
+                with open(target_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.strip():
+                            first_obj = json.loads(line)
+                            keys_info = list(first_obj.keys())
+                            break
+            except Exception:
+                keys_info = "无法解析首行键名"
+            raise ValueError(f"未能从 {target_path} 中解析出文本。首行数据的实际键名为: {keys_info}。请检查并修改 utils.py 的提取逻辑。")
+    else:
+        raise FileNotFoundError(f"未找到数据集: 尝试读取 {dataset_base_path} 目录及其 json 变体失败。")
         
     return texts
 

@@ -4,7 +4,7 @@
 set -e
 export CUDA_VISIBLE_DEVICES="1"
 # ================= 核心配置区 =================
-TARGET_MODEL_DIR="Oracle_Model_Merged"      
+TARGET_MODEL_DIR="Oracle_Model_Merged_Base"      
 # 使用带有子目录的相对路径 (省略后缀)
 DATASET_NAME="Magicoder-OSS-Instruct/data-oss_instruct-decontaminated"         
 
