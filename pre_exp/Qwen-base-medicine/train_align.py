@@ -2,31 +2,29 @@ import torch
 import torch.nn.functional as F
 import os
 import argparse
-from datasets import load_dataset
+from datasets import load_from_disk # 💡 [修改]
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer, DataCollatorForSeq2Seq
 from peft import LoraConfig, get_peft_model
 
 def main():
     parser = argparse.ArgumentParser(description="Phase 3: Dynamic Alignment Fine-Tuning")
-    # 动态超参数
     parser.add_argument("--alpha", type=float, default=0.2)
     parser.add_argument("--gamma", type=float, default=0.1)
     parser.add_argument("--lam", type=float, default=0.0)
     parser.add_argument("--beta", type=float, default=0.0)
     
-    # 💡 新增：动态控制起点模式
     parser.add_argument("--start_mode", type=str, required=True, choices=["phase2", "splicedbase"], help="起点模式: phase2 或 splicedbase")
     
-    # 动态路径
+    # 💡 [修改] 默认路径更新为医学模型的输出路径
     parser.add_argument("--base_model_path", type=str, default="./models/Qwen2.5-1.5B-Base")
-    parser.add_argument("--oracle_model_path", type=str, default="./outputs/Oracle_Model_Merged_Base")
-    parser.add_argument("--phase2_model_path", type=str, default="./outputs/Phase2_Baseline_Merged_Base")
+    parser.add_argument("--oracle_model_path", type=str, default="./outputs/Oracle_Model_Merged_Medical")
+    parser.add_argument("--phase2_model_path", type=str, default="./outputs/Phase2_Baseline_Merged_Medical")
     parser.add_argument("--output_dir", type=str, required=True, help="训练过程输出路径")
     parser.add_argument("--merged_save_dir", type=str, required=True, help="最终融合模型保存路径")
     args = parser.parse_args()
 
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-    PROXY_DATASET = "./datasets/Magicoder-OSS-Instruct"
+    PROXY_DATASET = "./datasets/processed_medical_data/proxy_chatdoctor_hf" # 💡 [修改]
     MAX_SEQ_LEN = 1024 
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -37,9 +35,6 @@ def main():
     if tokenizer.pad_token is None: 
         tokenizer.pad_token = tokenizer.eos_token
 
-    # ==========================================
-    # 💡 核心修复：根据 start_mode 动态构建起点模型
-    # ==========================================
     if args.start_mode == "phase2":
         print(f"📦 起点模式 [phase2]：直接加载 Baseline 模型: {args.phase2_model_path}")
         model = AutoModelForCausalLM.from_pretrained(args.phase2_model_path, torch_dtype=torch.bfloat16)
@@ -49,17 +44,15 @@ def main():
         base_model = AutoModelForCausalLM.from_pretrained(args.base_model_path, torch_dtype=torch.bfloat16)
         oracle_model = AutoModelForCausalLM.from_pretrained(args.oracle_model_path, torch_dtype=torch.bfloat16)
         
-        # 将 Oracle 的 4~23 层、norm 和 lm_head 覆盖给 Base
         for i in range(4, len(base_model.model.layers)):
             base_model.model.layers[i] = oracle_model.model.layers[i]
         base_model.model.norm = oracle_model.model.norm
         base_model.lm_head = oracle_model.lm_head
-        del oracle_model # 释放内存
+        del oracle_model 
         
         model = base_model
         print("✅ 缝合完成！")
 
-    # Anchor 锚点模型始终为 Base
     anchor_prefix = AutoModelForCausalLM.from_pretrained(args.base_model_path, torch_dtype=torch.bfloat16)
     anchor_prefix.model.layers = torch.nn.ModuleList(list(anchor_prefix.model.layers)[:4]) 
     anchor_prefix.lm_head = torch.nn.Identity() 
@@ -78,21 +71,25 @@ def main():
     else: 
         model.get_input_embeddings().register_forward_hook(lambda m, i, o: o.requires_grad_(True))
 
-    print("📝 处理公有代理数据集...")
-    dataset = load_dataset(PROXY_DATASET, split="train")
+    print("📝 处理公有医学代理数据集...")
+    dataset = load_from_disk(PROXY_DATASET) # 💡 [修改]
 
     def preprocess(example):
-        q = example.get('instruction', example.get('problem', example.get('prompt', example.get('input', example.get('query', '')))))
-        a = example.get('output', example.get('solution', example.get('response', '')))
-        if not q and 'messages' in example:
-            msgs = example['messages']
-            q = msgs[0]['content'] if len(msgs) > 0 else ''
-            a = msgs[1]['content'] if len(msgs) > 1 else ''
+        # 💡 [修改] 适应医学纯文本格式
+        text = example["text"]
+        parts = text.split("### Doctor:\n")
+        if len(parts) == 2:
+            prompt_text = parts[0] + "### Doctor:\n"
+            response_text = parts[1]
+        else:
+            prompt_text = text
+            response_text = ""
 
-        p_ids = tokenizer(f"<|im_start|>user\n{q}<|im_end|>\n<|im_start|>assistant\n", add_special_tokens=False).input_ids
-        r_ids = tokenizer(f"{a}<|im_end|>\n", add_special_tokens=False).input_ids
-        input_ids = (p_ids + r_ids)[:MAX_SEQ_LEN]
-        labels = ([-100] * len(p_ids) + r_ids)[:MAX_SEQ_LEN]
+        prompt_ids = tokenizer(prompt_text, add_special_tokens=False).input_ids
+        response_ids = tokenizer(response_text, add_special_tokens=False).input_ids
+
+        input_ids = (prompt_ids + response_ids)[:MAX_SEQ_LEN]
+        labels = ([-100] * len(prompt_ids) + response_ids)[:MAX_SEQ_LEN]
         return {"input_ids": input_ids, "labels": labels, "attention_mask": [1] * len(input_ids)}
 
     train_dataset = dataset.map(preprocess, remove_columns=dataset.column_names, num_proc=4)
@@ -107,7 +104,6 @@ def main():
             input_ids = inputs["input_ids"]
             labels = inputs.get("labels")
 
-            # 💡 防 OOM 优化：动态判断是否需要提取沉重的隐藏层状态
             need_hidden = (self.cw['lam'] > 0) or (self.cw['beta'] > 0)
             
             loss_anchor = torch.tensor(0.0, device=model.device)

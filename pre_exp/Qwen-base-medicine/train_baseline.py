@@ -1,18 +1,15 @@
 import torch
 import os
-from datasets import load_dataset
+from datasets import load_from_disk # 💡 [修改]
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer, DataCollatorForSeq2Seq
 from peft import LoraConfig, get_peft_model
 
-# os.environ["CUDA_VISIBLE_DEVICES"] = "2"
-# os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-
-# === 路径配置 ===
+# === 💡 [修改] 路径配置：指向新的医学数据集与输出目录 ===
 BASE_MODEL_PATH = "./models/Qwen2.5-1.5B-Base"
-ORACLE_MODEL_PATH = "./outputs/Oracle_Model_Merged_Base" 
-PROXY_DATASET = "./datasets/Magicoder-OSS-Instruct" # 使用公开数据集作为代理
-OUTPUT_DIR = "./outputs/Phase2_Baseline_Base"
-MERGED_SAVE_DIR = "./outputs/Phase2_Baseline_Merged_Base" 
+ORACLE_MODEL_PATH = "./outputs/Oracle_Model_Merged_Medical" 
+PROXY_DATASET = "./datasets/processed_medical_data/proxy_chatdoctor_hf" # 医学代理数据集
+OUTPUT_DIR = "./outputs/Phase2_Baseline_Medical"
+MERGED_SAVE_DIR = "./outputs/Phase2_Baseline_Merged_Medical" 
 MAX_SEQ_LEN = 1024
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -46,28 +43,26 @@ if hasattr(model, "enable_input_require_grads"):
 else: 
     model.get_input_embeddings().register_forward_hook(lambda m, i, o: o.requires_grad_(True))
 
-print("📝 处理公有代理数据集...")
-dataset = load_dataset(PROXY_DATASET, split="train")
+print("📝 处理公有代理医学数据集...")
+dataset = load_from_disk(PROXY_DATASET) # 💡 [修改]
 
 def preprocess(example):
-    # 新代码：终极万能字段提取
-    q = example.get('instruction', example.get('problem', example.get('prompt', example.get('input', example.get('query', '')))))
-    a = example.get('output', example.get('solution', example.get('response', '')))
+    # 💡 [修改] 适应医学纯文本格式的切分与 Mask 逻辑
+    text = example["text"]
+    parts = text.split("### Doctor:\n")
+    if len(parts) == 2:
+        prompt_text = parts[0] + "### Doctor:\n"
+        response_text = parts[1]
+    else:
+        prompt_text = text
+        response_text = ""
 
-    if not q and 'messages' in example:
-        msgs = example['messages']
-        q = msgs[0]['content'] if len(msgs) > 0 else ''
-        a = msgs[1]['content'] if len(msgs) > 1 else ''
+    prompt_ids = tokenizer(prompt_text, add_special_tokens=False).input_ids
+    response_ids = tokenizer(response_text, add_special_tokens=False).input_ids
 
-    # ⚠️ 加上这个安全锁，如果实在找不到列名，会在终端大声报警并打印所有的键名！
-    if not q:
-        print(f"\n🚨 严重警告: 无法在当前数据条目中找到指令字段！该数据的键名为: {list(example.keys())}")
+    input_ids = (prompt_ids + response_ids)[:MAX_SEQ_LEN]
+    labels = ([-100] * len(prompt_ids) + response_ids)[:MAX_SEQ_LEN]
 
-    p_ids = tokenizer(f"<|im_start|>user\n{q}<|im_end|>\n<|im_start|>assistant\n", add_special_tokens=False).input_ids
-    r_ids = tokenizer(f"{a}<|im_end|>\n", add_special_tokens=False).input_ids
-    
-    input_ids = (p_ids + r_ids)[:MAX_SEQ_LEN]
-    labels = ([-100] * len(p_ids) + r_ids)[:MAX_SEQ_LEN]
     return {"input_ids": input_ids, "labels": labels, "attention_mask": [1] * len(input_ids)}
 
 train_dataset = dataset.map(preprocess, remove_columns=dataset.column_names, num_proc=4)
