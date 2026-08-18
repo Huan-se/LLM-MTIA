@@ -4,12 +4,14 @@ import torch
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import re
 from transformers import AutoTokenizer
 import utils
 
+
 def main_extraction_and_plot():
     # ==========================================
-    # 第一阶段：数据提取与统计汇总 (适配全新超参数搜索命名)
+    # 第一阶段：数据提取与统计汇总
     # ==========================================
     print("=== 开始提取并解析实验数据 ===")
     
@@ -21,55 +23,69 @@ def main_extraction_and_plot():
             return
 
     extracted_data = []
+    hp_pattern = re.compile(r'_l(\d+)_([a-zA-Z]+)_lr([0-9\.]+)_wdm([0-9\.]+)(?:_wl1([0-9\.]+))?_ep([0-9]+)_([a-zA-Z]+)(?:_cv([a-zA-Z0-9\-]+))?_in([a-zA-Z0-9_]+)$')
 
     for exp_folder in os.listdir(results_dir):
+        if exp_folder == "batch_logs":
+            continue
+            
         exp_path = os.path.join(results_dir, exp_folder)
         if not os.path.isdir(exp_path): continue
 
         setting_label = "Unknown"
+        model_family = "[Unknown]"
         lr = 0.0
+        attack_type = "Oracle"
         
-        if exp_folder.startswith("search_Oracle_"):
-            # 解析格式: search_Oracle_l4_tbs_lr0.01_wdm20_wl10.001_ep5000_mse
-            try:
-                params_str = exp_folder.replace("search_Oracle_", "")
-                parts = params_str.split('_')
-                layer = parts[0].replace('l', '')
-                method = parts[1].upper()
-                lr_val = parts[2].replace('lr', '')
-                w_dm = parts[3].replace('wdm', '')
-                w_l1 = parts[4].replace('wl1', '')
-                steps = parts[5].replace('ep', '')
-                loss_type = parts[6] if len(parts) > 6 else "mse"
-                # 处理可能不存在的旧文件夹以防报错
-                changevar = parts[7].replace('cv', '') if len(parts) > 7 else "atan-5"
-                # 注意：xav_uni 中间本身有一个下划线，如果是拆分，在 parts 里占据两格
-                if len(parts) > 9:
-                    init_type = parts[8].replace('in', '') + "_" + parts[9]
+        match = hp_pattern.search(exp_folder)
+        if match:
+            layer = match.group(1)
+            method = match.group(2).upper()
+            lr_val = match.group(3)
+            w_dm = match.group(4)
+            w_l1 = match.group(5) if match.group(5) else "0.0"
+            steps = match.group(6)
+            loss_type = match.group(7)
+            changevar = match.group(8) if match.group(8) else "atan-5"
+            init_type = match.group(9)
+            
+            lr = float(lr_val)
+            
+            # 提取所属 Model Family (大类) 与完整 Setting 标签
+            if "Transfer_" in exp_folder or "eval_transfer_" in exp_folder:
+                attack_type = "Transfer"
+                surr_match = re.search(r'Transfer_(.*?)_l\d+_', exp_folder)
+                proxy_name = surr_match.group(1) if surr_match else "Proxy"
+                if "model" in proxy_name:
+                    proxy_short = "model"
                 else:
-                    init_type = parts[8].replace('in', '') if len(parts) > 8 else "ones"
+                    proxy_short = "_".join(proxy_name.split('_')[1:3]) if '_' in proxy_name else proxy_name[:10]
+                model_family = f"[{attack_type}-{proxy_short}]"
+                setting_label = f"{model_family} lr{lr_val}_wdm{w_dm}_ep{steps}_{init_type}"
+            elif "Base" in exp_folder or "base" in exp_folder:
+                attack_type = "Base-prefix"
+                model_family = "[Base-prefix]"
+                setting_label = f"{model_family} lr{lr_val}_wdm{w_dm}_ep{steps}_{init_type}"
+            else:
+                attack_type = "Oracle"
+                model_family = "[Oracle]"
+                setting_label = f"{model_family} lr{lr_val}_wdm{w_dm}_ep{steps}_{init_type}"
                 
-                lr = float(lr_val)
-                # 全量拼接标签
-                setting_label = f"lr{lr_val}_L{layer}_{method}_wdm{w_dm}_wl1{w_l1}_ep{steps}_{loss_type}_cv{changevar}_in{init_type}"
-            except Exception as e:
-                print(f"跳过无法解析的搜参文件夹: {exp_folder}")
-                continue
-        # ---------------------------
         elif "_vs_" in exp_folder:
-            # 兼容老格式
             try:
                 parts = exp_folder.split('_vs_')
                 remainder = parts[1]
                 layer_idx = remainder.find('_layer')
-                setting_label = remainder[:layer_idx] if layer_idx != -1 else remainder
+                model_family = "[Legacy]"
+                setting_label = f"[Legacy] {remainder[:layer_idx] if layer_idx != -1 else remainder}"
                 lr = float(remainder.split('_lr')[-1])
+                lr_val = str(lr)
             except:
                 continue
         else:
+            print(f"跳过无法解析的文件夹: {exp_folder}")
             continue
 
-        # 进入子目录寻找指标文件
         for sub_folder in os.listdir(exp_path):
             sub_path = os.path.join(exp_path, sub_folder)
             if not os.path.isdir(sub_path): continue
@@ -81,11 +97,13 @@ def main_extraction_and_plot():
                     metrics = data.get('evaluation_metrics', {})
                     
                     row = {
+                        "Model Family": model_family,
+                        "Attack Class": attack_type,
                         "Setting (Layer-Method-Reg)": setting_label,
                         "LR": lr,
+                        "LR_str": lr_val,
                         "BLEU Score": metrics.get("bleu_score", 0.0),
                         "ROUGE-L": metrics.get("rougeL_score", 0.0),
-                        "Exact Match": metrics.get("exact_match", 0.0),
                         "Token F1": metrics.get("token_set_f1", 0.0),
                         "Final Loss": data['L'][-1].item() if 'L' in data and len(data['L']) > 0 else None
                     }
@@ -94,87 +112,164 @@ def main_extraction_and_plot():
                     print(f"读取指标文件失败 {pt_file}: {e}")
 
     if not extracted_data:
-        print("未提取到任何有效数据，请确保至少有一个任务成功完成了所有迭代。")
+        print("未提取到任何有效数据。")
         return
 
-    # 转化为 DataFrame 并格式化
     df = pd.DataFrame(extracted_data)
-    df = df.sort_values(by=["Setting (Layer-Method-Reg)", "LR"]).reset_index(drop=True)
-    df_rounded = df.round(4)
+    
+    # 仅针对同名配置的多次重复测试取均值，保留不同超参配置为独立行
+    agg_funcs = {
+        'BLEU Score': 'mean',
+        'ROUGE-L': 'mean',
+        'Token F1': 'mean',
+        'Final Loss': 'mean'
+    }
+    df_aggregated = df.groupby(['Model Family', 'Attack Class', 'Setting (Layer-Method-Reg)', 'LR_str'], as_index=False).agg(agg_funcs)
+    df_aggregated['LR'] = df_aggregated['LR_str'].astype(float)
 
-    print("\n=== MTIA 攻击超参数搜索结果汇总 (Markdown) ===\n")
+    # 核心：按 Model Family 归类排序，使同大类的项紧密排列
+    df_aggregated = df_aggregated.sort_values(by=["Model Family", "LR", "Setting (Layer-Method-Reg)"]).reset_index(drop=True)
+    metric_cols = ['BLEU Score', 'ROUGE-L', 'Token F1', 'Final Loss']
+    df_rounded = df_aggregated.copy()
+    df_rounded[metric_cols] = df_aggregated[metric_cols].round(4)
+    
+    output_column_order = [
+        "Model Family",
+        "Setting (Layer-Method-Reg)",
+        "LR",
+        "BLEU Score",
+        "ROUGE-L",
+        "Token F1",
+        "Final Loss"
+    ]
+    df_display = df_rounded[output_column_order].copy()
+
+    print("\n=== MTIA 综合攻击结果汇总 (Markdown) ===\n")
     try:
-        print(df_rounded.to_markdown(index=False))
+        print(df_display.to_markdown(index=False))
     except ImportError:
-        print("[警告] 环境中未安装 tabulate，使用原生 Pandas 格式打印：")
-        print(df_rounded)
+        print(df_display)
 
     csv_path = os.path.join(results_dir, "mtia_search_summary.csv")
-    df.to_csv(csv_path, index=False)
+    df_display.to_csv(csv_path, index=False)
     print(f"\n✅ 数据已提取并保存至: {os.path.abspath(csv_path)}")
 
-    # ==========================================
-    # 第二阶段：数据重塑与 Seaborn 搜参可视化
-    # ==========================================
-    print("\n=== 开始渲染可视化图表 ===")
+    # ====================================================================
+    # 第二阶段：同族色系渐变映射 (Family Color Palette + Texture Generation)
+    # ====================================================================
+    print("\n=== 开始构建同族色系映射与渲染可视化图表 ===")
     
+    # 1. 基础族系主色调库
+    base_color_pool = [
+        '#1f77b4',  # 蓝色系 (Transfer-1)
+        '#ff7f0e',  # 橙色系 (Transfer-2)
+        '#9467bd',  # 紫色系 (Transfer-3)
+        '#d62728',  # 红色系 (Transfer-4)
+        '#8c564b',  # 棕色系
+        '#e377c2',  # 粉色系
+        '#17becf',  # 青蓝系
+    ]
+    
+    # 特别指定具有基准意义的模型主色
+    special_family_hues = {
+        '[Oracle]': '#2ca02c',       # 翡翠绿系 (上限参考)
+        '[Base-prefix]': '#7f7f7f',  # 经典灰系 (基准参考)
+    }
+
+    unique_families = list(df_display['Model Family'].unique())
+    palette_dict = {}
+    hatch_dict = {}
+    hatch_pool = ['', '///', '\\\\\\', 'xxx', '...', '+++', 'ooo', '***']
+
+    color_idx = 0
+    for family in unique_families:
+        # 获取属于该 Family 的所有独立 Setting 配置
+        family_settings = list(df_display[df_display['Model Family'] == family]['Setting (Layer-Method-Reg)'].unique())
+        n_sub = len(family_settings)
+
+        # 确定大族的主色
+        if family in special_family_hues:
+            base_hue = special_family_hues[family]
+        else:
+            base_hue = base_color_pool[color_idx % len(base_color_pool)]
+            color_idx += 1
+
+        # 自动生成同族深浅渐变色阶（避开过浅发白的颜色）
+        if n_sub == 1:
+            shades = [base_hue]
+        else:
+            cmap = sns.light_palette(base_hue, n_colors=n_sub + 2, input='hex')
+            shades = [cmap[i] for i in range(2, n_sub + 2)]
+
+        # 赋予组内每个设置：对应的渐变色 + 区分性纹理
+        for idx, setting in enumerate(family_settings):
+            palette_dict[setting] = shades[idx]
+            hatch_dict[setting] = hatch_pool[idx % len(hatch_pool)]
+
+    # 2. 数据重塑为长格式 (3栏指标)
+    target_metrics = ['BLEU Score', 'ROUGE-L', 'Token F1']
     df_melt = pd.melt(
-        df, 
-        id_vars=['Setting (Layer-Method-Reg)', 'LR'],
-        value_vars=['BLEU Score', 'ROUGE-L', 'Exact Match', 'Token F1'],
+        df_display, 
+        id_vars=['Model Family', 'Setting (Layer-Method-Reg)', 'LR'],
+        value_vars=target_metrics,
         var_name='Metric', 
         value_name='Value'
     )
 
-    metric_map = {'BLEU Score': 'BLEU', 'ROUGE-L': 'Rouge-L', 'Exact Match': 'EM', 'Token F1': 'F1'}
+    metric_map = {'BLEU Score': 'BLEU', 'ROUGE-L': 'ROUGE-L', 'Token F1': 'F1'}
     df_melt['Metric'] = df_melt['Metric'].map(metric_map)
-
-    df_melt.loc[df_melt['Metric'] == 'EM', 'Value'] *= 100
     df_melt.loc[df_melt['Metric'] == 'F1', 'Value'] *= 100
 
-    sns.set_theme(style="darkgrid")
-    
+    # 3. 开始 Seaborn 画图
+    sns.set_theme(style="whitegrid", font="sans-serif")
+    all_ordered_settings = list(df_display['Setting (Layer-Method-Reg)'].unique())
+
     g = sns.catplot(
         x='LR', 
         y='Value', 
         data=df_melt, 
         col='Metric', 
-        hue='Setting (Layer-Method-Reg)', # 使用解析出的超参数组合进行图例区分
+        hue='Setting (Layer-Method-Reg)',
+        hue_order=all_ordered_settings,  # 确保同组配置在柱状图中按顺序排列
+        palette=palette_dict,            # 应用同族色系映射
         kind='bar', 
         sharey=False, 
-        height=4.0, 
-        aspect=1.2
+        height=4.6, 
+        aspect=1.2,
+        legend_out=True
     )
     
-    g.set_axis_labels("Learning Rate", "Metric Value")
+    g.set_axis_labels("Learning Rate (LR)", "Metric Score")
     
-    titles = ['BLEU Score', 'ROUGE-L Score', 'Exact Match (%)', 'Token F1 (%)']
-    for ax, title in zip(g.axes[0], titles):
-        ax.set_title(title)
+    sub_titles = ['BLEU Score', 'ROUGE-L Score', 'Token F1 (%)']
+    for ax, title in zip(g.axes.flat, sub_titles):
+        ax.set_title(title, fontsize=12, fontweight='bold')
+        ax.tick_params(labelsize=10)
 
-    hatches = ['o', 'x', '\\\\', '*', '+', '-'] 
-    for i, ax in enumerate(g.axes[0]):
-        num_lrs = max(len(df['LR'].unique()), 1)
-        for j, thisbar in enumerate(ax.patches):
-            num_settings = len(df['Setting (Layer-Method-Reg)'].unique())
-            if num_settings > 0:
-                hatch_idx = (j // num_lrs) % len(hatches)
-                thisbar.set_hatch(hatches[hatch_idx])
+    # 4. 精准为各个容器添加对应的组内纹理（Hatch）
+    for ax in g.axes.flat:
+        for container, setting in zip(ax.containers, all_ordered_settings):
+            hatch_pat = hatch_dict.get(setting, '')
+            for bar in container:
+                bar.set_hatch(hatch_pat)
+                bar.set_edgecolor('#222222')
+                bar.set_linewidth(0.5)
 
-    for ax in g.axes[0]:
-        plt.setp(ax.get_yticklabels(), fontsize=10)
-        ax.tick_params(pad=-4, rotation=0)
+    # 5. 美化图例
+    if g._legend:
+        g._legend.set_title("Experimental Setting (Grouped by Model)")
+        plt.setp(g._legend.get_title(), fontsize=10, fontweight='bold')
+        plt.setp(g._legend.get_texts(), fontsize=8)
 
-    plt.subplots_adjust(hspace=0., wspace=0.25)
+    plt.subplots_adjust(wspace=0.22)
     
     plot_path = os.path.join(results_dir, "mtia_search_comparison_plot.png")
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-    print(f"✅ 绘图完成！科研对比图表已保存为: {os.path.abspath(plot_path)}")
+    print(f"✅ 绘图完成！同族分色渐变图表已保存为: {os.path.abspath(plot_path)}")
 
 
 def main_text_report():
     print("\n=== 开始生成输入与逆向输入视觉对比报告 ===")
-    
     results_dir = "../resultsx"
     if not os.path.exists(results_dir):
         results_dir = "./resultsx"
@@ -182,9 +277,12 @@ def main_text_report():
 
     dataset_cache = {}
     tokenizer_cache = {}
-    report_lines = ["# MTIA 输入反转参数搜索对比报告\n\n"]
+    report_lines = ["# MTIA 综合攻击 (Oracle & Transfer) 对比报告\n\n"]
 
     for exp_folder in sorted(os.listdir(results_dir)):
+        if exp_folder == "batch_logs":
+            continue
+            
         exp_path = os.path.join(results_dir, exp_folder)
         if not os.path.isdir(exp_path): continue
 
@@ -201,13 +299,14 @@ def main_text_report():
 
                 dataset_name = args.get('dataset')
                 target_model = args.get('target_model')
+                surrogate_model = args.get('surrogate_model', target_model)
                 data_range = args.get('range')
 
                 if not dataset_name or not target_model: continue
 
-                # --- 核心更新：修复 Mistral Tokenizer 兼容性 ---
+                attack_context = "🎯 单模型攻击 (Oracle)" if target_model == surrogate_model else f"⚔️ 跨模型窃取 (Proxy: {surrogate_model})"
+
                 if target_model not in tokenizer_cache:
-                    print(f"正在加载 Tokenizer: {target_model} ...")
                     llm_path = utils.LLM_PATH[target_model]
                     try:
                         tokenizer_cache[target_model] = AutoTokenizer.from_pretrained(llm_path, fix_mistral_regex=True)
@@ -218,9 +317,7 @@ def main_text_report():
                 if tokenizer.pad_token is None:
                     tokenizer.pad_token = tokenizer.eos_token
 
-                # 数据集读取 (utils 已经更新，自动兼容 Parquet 目录)
                 if dataset_name not in dataset_cache:
-                    print(f"正在解析原始数据集: {dataset_name} ...")
                     raw_texts = utils.get_list_invert_text(dataset_name)
                     sorted_texts = sorted(raw_texts, key=lambda x: len(tokenizer.encode(x, add_special_tokens=False)), reverse=True)
                     dataset_cache[dataset_name] = sorted_texts
@@ -228,8 +325,7 @@ def main_text_report():
                 try:
                     start, end = map(int, data_range.split(':'))
                     original_texts = dataset_cache[dataset_name][start:end]
-                except Exception as e:
-                    print(f"范围解析失败或数据量不足: {e}")
+                except Exception:
                     continue
 
                 inputdict = tokenizer(original_texts, padding=True, truncation=True, max_length=128, add_special_tokens=False, return_tensors="pt")
@@ -246,29 +342,23 @@ def main_text_report():
                 metrics = data.get('evaluation_metrics', {})
 
                 report_lines.append(f"## 实验配置组: `{exp_folder}`")
-                report_lines.append(f"> **范围**: {data_range} | **EM**: {metrics.get('exact_match', 0)*100:.2f}% | **F1**: {metrics.get('token_set_f1', 0)*100:.2f}% | **BLEU**: {metrics.get('bleu_score', 0):.4f}\n")
+                report_lines.append(f"**攻击场景**: {attack_context}")
+                report_lines.append(f"> **范围**: {data_range} | **F1**: {metrics.get('token_set_f1', 0)*100:.2f}% | **BLEU**: {metrics.get('bleu_score', 0):.4f}\n")
 
                 for i in range(len(true_references)):
                     orig = true_references[i]
                     inv = invert_texts[i] if i < len(invert_texts) else "N/A"
 
                     report_lines.append(f"### 样本 {start + i}")
-                    report_lines.append("**[Ground Truth - 原始真实输入 (截断至128 Token)]**")
-                    report_lines.append("```text")
-                    report_lines.append(orig)
-                    report_lines.append("```")
-                    report_lines.append("**[Inverted Text - 逆向恢复输入]**")
-                    report_lines.append("```text")
-                    report_lines.append(inv)
-                    report_lines.append("```")
-                    report_lines.append("---\n")
+                    report_lines.append("**[Ground Truth - 原始真实输入]**\n```text\n" + orig + "\n```")
+                    report_lines.append("**[Inverted Text - 逆向恢复输入]**\n```text\n" + inv + "\n```\n---\n")
 
     report_path = os.path.join(results_dir, "text_search_comparison_report.md")
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("\n".join(report_lines))
 
     print(f"\n✅ 文本对比报告生成完毕！已保存至: {os.path.abspath(report_path)}")
-    print("💡 使用 VS Code 的 Markdown 预览功能即可直观对比不同超参数下的反转效果差异。")
+
 
 if __name__ == "__main__":
     main_extraction_and_plot()

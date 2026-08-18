@@ -4,9 +4,9 @@ import glob
 
 def parse_logs_to_md():
     # 日志文件夹路径
-    log_dir = "./search_outputs/batch_logs"
+    log_dir = "./search_outputs_1/batch_logs"
     # 生成的 Markdown 文件保存路径
-    output_md_path = "./search_outputs/summary_results.md"
+    output_md_path = "./search_outputs_1/summary_results.md"
     
     if not os.path.exists(log_dir):
         print(f"❌ 找不到日志文件夹: {log_dir}")

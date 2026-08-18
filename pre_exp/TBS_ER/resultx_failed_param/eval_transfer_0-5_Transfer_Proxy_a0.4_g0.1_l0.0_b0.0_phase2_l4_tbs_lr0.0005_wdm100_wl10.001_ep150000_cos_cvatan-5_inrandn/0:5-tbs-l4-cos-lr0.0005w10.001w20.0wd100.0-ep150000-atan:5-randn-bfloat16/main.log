@@ -1,0 +1,451 @@
+2026-07-20 21:28:43 - __main__ - INFO - Loading Target Model from /home/intern01sjh/LLM_MTIA/pre_exp/TBS_ER/white-box-inversion/../data/models/Oracle_Model_Merged_Base...
+2026-07-20 21:28:43 - accelerate.utils.modeling - INFO - We will use 90% of the memory on device 0 for storing the model, and 10% for the buffer to avoid OOM. You can set `max_memory` in to a higher value to use more memory (at your own risk).
+2026-07-20 21:28:44 - __main__ - INFO - Loading Surrogate Model from /home/intern01sjh/LLM_MTIA/pre_exp/TBS_ER/white-box-inversion/../data/models/Proxy_a0.4_g0.1_l0.0_b0.0_phase2...
+2026-07-20 21:28:44 - accelerate.utils.modeling - INFO - We will use 90% of the memory on device 0 for storing the model, and 10% for the buffer to avoid OOM. You can set `max_memory` in to a higher value to use more memory (at your own risk).
+2026-07-20 21:29:37 - __main__ - INFO - You are participating in a computer vision competition where you are provided with a pre-trained image classification model and a large dataset of images. Due to memory constraints, you cannot process all the images at once. Your task is to write a function that performs inference on the images in batches. The function should take as input the dataset of images, the pre-trained model, and the batch size. The function should return the predicted class labels for all the images.
+
+The dataset of images is represented as a tuple of tensors, where each tensor corresponds to a different feature of the images (e.g., RGB channels, image size, etc.). Some features may be `None`, indicating that they are not used by the model. The pre-trained model is a PyTorch model that takes as input a tuple of tensors and returns a tensor of predicted class labels.
+
+Your function should perform the following steps:
+
+- Determine the total number of images in the dataset.
+- Initialize an empty list to store the predicted class labels for each batch.
+- Iterate over the dataset in batches of the specified size.
+  - For each batch, extract the relevant features from the dataset and convert them to PyTorch tensors.
+  - If a GPU is available, move the tensors to the GPU.
+  - Pass the tensors to the pre-trained model and obtain the predicted class labels.
+  - Move the predicted class labels to the CPU and store them in the list.
+- Concatenate the predicted class labels for all batches into a single tensor and return it.
+
+Additionally, the dataset may include non-image data that needs to be transformed before passing it to the model. Each feature may require a different transformation method (e.g., normalization, one-hot encoding). You should define a dictionary that maps each feature index to its corresponding transformation function. The function should apply these transformations to the relevant features before passing them to the model.
+
+**Sample Input:**
+```python
+import torch
+import torch.nn as nn
+
+# Mock dataset with 10 images, each having 3 features (RGB channels, image size, and metadata)
+dataset = (
+    torch.randn(10, 3, 224, 224),  # RGB channels
+    torch.tensor([[224, 224]] * 10),  # Image size
+    torch.tensor([0, 1, 0, 1, 0, 1, 0, 1, 0, 1])  # Metadata
+)
+
+# Mock pre-trained model
+class MockModel(nn.Module):
+    def __init__(self):
+        super(MockModel, self).__init__()
+        self.fc = nn.Linear(3 * 224 * 224 + 2 + 1, 10)  # Assuming 10 classes
+
+    def forward(self, rgb, size, metadata):
+        if rgb is not None:
+            rgb = rgb.view(rgb.size(0), -1)
+        if size is not None:
+            size = size.float()
+        if metadata is not None:
+            metadata = metadata.float().unsqueeze(1)
+        x = torch.cat([rgb, size, metadata], dim=1)
+        return self.fc(x)
+
+model = MockModel()
+
+# Transformations dictionary
+transformations = {
+    0: lambda x: x / 255.0,  # Normalize RGB channels
+    1: lambda x: x / 224.0,  # Normalize image size
+    2: lambda x: x.unsqueeze(1)  # One-hot encode metadata
+}
+
+batch_size = 2
+```
+
+**Sample Output:**
+```python
+tensor([[ 0.1234, -0.5678,  0.9012, -0.3456,  0.7890, -0.2345,  0.6789, -0.1234,  0.5678, -0.9012],
+        [ 0.1234, -0.5678,  0.9012, -0.3456,  0.7890, -0.2345,  0.6789, -0.1234,  0.5678, -0.9012],
+        [ 0.1234, -0.5678,  0.9012, -0.3456,  0.7890, -0.2345,  0.6789, -0.1234,  0.5678, -0.9012],
+        [ 0.1234, -0.5678,  0.9012, -0.3456,  0.7890, -0.2345,  0.6789, -0.1234,  0.5678, -0.9012],
+        [ 0.1234, -0.5678,  0.9012, -0.3456,  0.7890, -0.2345,  0.6789, -0.1234,  0.5678, -0.9012],
+        [ 0.1234, -0.5678,  0.9012, -0.3456,  0.7890, -0.2345,  0.6789, -0.1234,  0.5678, -0.9012],
+        [ 0.1234, -0.5678,  0.9012, -0.3456,  0.7890, -0.2345,  0.6789, -0.1234,  0.5678, -0.9012],
+        [ 0.1234, -0.5678,  0.9012, -0.3456,  0.7890, -0.2345,  0.6789, -0.1234,  0.5678, -0.9012],
+        [ 0.1234, -0.5678,  0.9012, -0.3456,  0.7890, -0.2345,  0.6789, -0.1234,  0.5678, -0.9012],
+        [ 0.1234, -0.5678,  0.9012, -0.3456,  0.7890, -0.2345,  0.6789, -0.1234,  0.5678, -0.9012]])
+```
+You are given a set of one-dimensional rods, each with its own thermal diffusivity and initial temperature. Your task is to simulate the diffusion of heat in these rods using the finite difference method. Each rod is of length `xmax` and is initially at a uniform temperature specified by `T0`. The left end of each rod is maintained at a constant temperature of `T0`, while the right end is insulated, meaning there is no heat loss. The rods are divided into `nx` equal segments, and the simulation runs for `nt` timesteps, each of duration `dt`.
+
+Write a function `heat_diffusion(nx, nt, dt, alphas, xmax, T0s)` that returns a 3D NumPy array representing the temperature distribution in each rod over time. The first dimension of the array corresponds to time, the second dimension corresponds to the rod, and the third dimension corresponds to the position along the rod.
+
+**Input:**
+- `nx`: Number of spatial segments in each rod.
+- `nt`: Number of timesteps.
+- `dt`: Duration of each timestep.
+- `alphas`: List of thermal diffusivities for each rod.
+- `xmax`: Length of each rod.
+- `T0s`: List of initial temperatures for each rod.
+
+**Output:**
+- A 3D NumPy array of shape `(nt, len(alphas), nx)` representing the temperature distribution in each rod over time.
+
+**Sample Input:**
+```python
+nx = 10
+nt = 5
+dt = 0.1
+alphas = [0.1, 0.2]
+xmax = 1.0
+T0s = [100, 200]
+```
+
+**Sample Output:**
+```python
+array([[[100.        , 100.        , 100.        , 100.        , 100.        ,
+         100.        , 100.        , 100.        , 100.        , 100.        ],
+        [200.        , 200.        , 200.        , 200.        , 200.        ,
+         200.        , 200.        , 200.        , 200.        , 200.        ]],
+
+       [[100.        , 100.00999999, 100.01999998, 100.02999997, 100.03999996,
+         100.04999995, 100.05999994, 100.06999993, 100.07999992, 100.08999991],
+        [200.        , 200.01999999, 200.03999998, 200.05999997, 200.07999996,
+         200.09999995, 200.11999994, 200.13999993, 200.15999992, 200.17999991]],
+
+       [[100.        , 100.01999998, 100.03999996, 100.05999994, 100.07999992,
+         100.0999999 , 100.11999988, 100.13999986, 100.15999984, 100.17999982],
+        [200.        , 200.03999998, 200.07999996, 200.11999994, 200.15999992,
+         200.1999999 , 200.23999988, 200.27999986, 200.31999984, 200.35999982]],
+
+       [[100.        , 100.02999997, 100.05999994, 100.08999991, 100.11999988,
+         100.14999985, 100.17999982, 100.20999979, 100.23999976, 100.26999973],
+        [200.        , 200.05999997, 200.11999994, 200.17999991, 200.23999988,
+         200.29999985, 200.35999982, 200.41999979, 200.47999976, 200.53999973]],
+
+       [[100.        , 100.03999996, 100.07999992, 100.11999988, 100.15999984,
+         100.1999998 , 100.23999976, 100.27999972, 100.31999968, 100.35999964],
+        [200.        , 200.07999996, 200.15999992, 200.23999988, 200.31999984,
+         200.3999998 , 200.47999976, 200.55999972, 200.63999968, 200.71999964]]])
+```
+You are tasked with developing a function for a new game that requires generating a 10x10 grid of randomly colored blocks. Each block's color is represented by an RGB tuple, with each component being an integer between 0 and 255, inclusive. Your function should return a 10x10 grid as a list of lists, where each sublist corresponds to a row in the grid, and each element in a sublist represents a block's color.
+
+**Input:**
+- None
+
+**Output:**
+- A 10x10 list of lists, where each inner list contains 3 integers representing the RGB values of a block.
+
+**Sample Output:**
+```
+[
+    [(123, 45, 67), (89, 101, 113), (125, 137, 149), (161, 173, 185), (197, 209, 221), (233, 245, 255), (0, 12, 24), (36, 48, 60), (72, 84, 96), (108, 120, 132)],
+    [(144, 156, 168), (180, 192, 204), (216, 228, 240), (255, 255, 255), (0, 0, 0), (15, 30, 45), (60, 75, 90), (75, 90, 105), (90, 105, 120), (105, 120, 135)],
+    [(120, 135, 150), (135, 150, 165), (150, 165, 180), (165, 180, 195), (180, 195, 210), (195, 210, 225), (210, 225, 240), (225, 240, 255), (0, 15, 30), (15, 30, 45)],
+    [(30, 45, 60), (45, 60, 75), (60, 75, 90), (75, 90, 105), (90, 105, 120), (105, 120, 135), (120, 135, 150), (135, 150, 165), (150, 165, 180), (165, 180, 195)],
+    [(180, 195, 210), (195, 210, 225), (210, 225, 240), (225, 240, 255), (0, 15, 30), (15, 30, 45), (30, 45, 60), (45, 60, 75), (60, 75, 90), (75, 90, 105)],
+    [(90, 105, 120), (105, 120, 135), (120, 135, 150), (135, 150, 165), (150, 165, 180), (165, 180, 195), (180, 195, 210), (195, 210, 225), (210, 225, 240), (225, 240, 255)],
+    [(0, 15, 30), (15, 30, 45), (30, 45, 60), (45, 60, 75), (60, 75, 90), (75, 90, 105), (90, 105, 120), (105, 120, 135), (120, 135, 150), (135, 150, 165)],
+    [(150, 165, 180), (165, 180, 195), (180, 195, 210), (195, 210, 225), (210, 225, 240), (225, 240, 255), (0, 15, 30), (15, 30, 45), (30, 45, 60), (45, 60, 75)],
+    [(60, 75, 90), (75, 90, 105), (90, 105, 120), (105, 120, 135), (120, 135, 150), (135, 150, 165), (150, 165, 180), (165, 180, 195), (180, 195, 210), (195, 210, 225)],
+    [(75, 90, 105), (90, 105, 120), (105, 120, 135), (120, 135, 150), (135, 150, 165), (150, 165, 180), (165, 180, 195), (180, 195, 210), (195, 210, 225), (210, 225, 240)]
+]
+```
+You are given a JSON file named `experiments.json` containing data about a series of experiments. Each experiment is represented as a dictionary with the following structure:
+
+- `experiment`: A string representing the name of the experiment.
+- `version`: A string representing the version of the experiment.
+- `data`: A list of dictionaries, where each dictionary represents a topic within the experiment. Each topic dictionary has the following structure:
+  - `title`: A string representing the title of the topic.
+  - `topic_context`: A string providing context about the topic.
+  - `qas`: A list of dictionaries, where each dictionary represents a question-answer set related to the topic. Each question-answer set dictionary has the following structure:
+    - `id`: A string representing the unique identifier of the question-answer set.
+    - `is_impossible`: A boolean indicating whether the question is impossible to answer given the provided context.
+    - `question`: A string representing the question.
+    - `answers`: A list of dictionaries, where each dictionary represents an answer to the question. Each answer dictionary has the following structure:
+      - `text`: A string representing the answer text.
+      - `answer_start`: An integer representing the character index in the `topic_context` where the answer text begins.
+
+Your task is to write a function `print_memory_addresses_and_types` that takes the filename of the JSON file as input and prints the memory address and type of each key-value pair in the JSON file. Your function should also print the memory address and type of each element in the lists within the JSON file.
+
+**Sample Input:**
+```json
+{
+  "experiment": "Experiment1",
+  "version": "v1.0",
+  "data": [
+    {
+      "title": "Topic1",
+      "topic_context": "Context for Topic1",
+      "qas": [
+        {
+          "id": "Q1",
+          "is_impossible": false,
+          "question": "What is Topic1?",
+          "answers": [
+            {
+              "text": "Answer to Topic1",
+              "answer_start": 0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+**Sample Output:**
+```
+Key: experiment, Address: 140735524289328, Type: <class 'str'>
+Value: Experiment1, Address: 140735524289328, Type: <class 'str'>
+Key: version, Address: 140735524289328, Type: <class 'str'>
+Value: v1.0, Address: 140735524289328, Type: <class 'str'>
+Key: data, Address: 140735524289328, Type: <class 'str'>
+Value: [{'title': 'Topic1', 'topic_context': 'Context for Topic1', 'qas': [{'id': 'Q1', 'is_impossible': False, 'question': 'What is Topic1?', 'answers': [{'text': 'Answer to Topic1', 'answer_start': 0}]}]}], Address: 140735524289328, Type: <class 'list'>
+Item: {'title': 'Topic1', 'topic_context': 'Context for Topic1', 'qas': [{'id': 'Q1', 'is_impossible': False, 'question': 'What is Topic1?', 'answers': [{'text': 'Answer to Topic1', 'answer_start': 0}]}]}, Address: 140735524289328, Type: <class 'dict'>
+Key: title, Address: 140735524289328, Type: <class 'str'>
+Value: Topic1, Address: 140735524289328, Type: <class 'str'>
+Key: topic_context, Address: 140735524289328, Type: <class 'str'>
+Value: Context for Topic1, Address: 140735524289328, Type: <class 'str'>
+Key: qas, Address: 140735524289328, Type: <class 'str'>
+Value: [{'id': 'Q1', 'is_impossible': False, 'question': 'What is Topic1?', 'answers': [{'text': 'Answer to Topic1', 'answer_start': 0}]}], Address: 140735524289328, Type: <class 'list'>
+Item: {'id': 'Q1', 'is_impossible': False, 'question': 'What is Topic1?', 'answers': [{'text': 'Answer to Topic1', 'answer_start': 0}]}, Address: 140735524289328, Type: <class 'dict'>
+Key: id, Address: 140735524289328, Type: <class 'str'>
+Value: Q1, Address: 140735524289328, Type: <class 'str'>
+Key: is_impossible, Address: 140735524289328, Type: <class 'str'>
+Value: False, Address: 140735524289328, Type: <class 'bool'>
+Key: question, Address: 140735524289328, Type: <class 'str'>
+Value: What is Topic1?, Address: 140735524289328, Type: <class 'str'>
+Key: answers, Address: 140735524289328, Type: <class 'str'>
+Value: [{'text': 'Answer to Topic1', 'answer_start': 0}], Address: 140735524289328, Type: <class 'list'>
+Item: {'text': 'Answer to Topic1', 'answer_start': 0}, Address: 140735524289328, Type: <class 'dict'>
+Key: text, Address: 140735524289328, Type: <class 'str'>
+Value: Answer to Topic1, Address: 140735524289328, Type: <class 'str'>
+Key: answer_start, Address: 140735524289328, Type: <class 'str'>
+Value: 0, Address: 140735524289328, Type: <class 'int'>
+```
+You are given a string `s`. Your task is to implement a function `find_palindromes` that identifies all unique palindromic substrings within `s`. The function should ignore case and non-alphanumeric characters. A palindromic substring is a sequence of characters that reads the same backward as forward and has a length greater than 1.
+
+**Input:**
+- A single string `s` (1 ≤ |s| ≤ 1000), which may contain uppercase and lowercase letters, digits, and punctuation.
+
+**Output:**
+- A list of unique palindromic substrings, sorted in lexicographical order.
+
+**Sample Input:**
+```
+"Madam, in Eden, I'm Adam"
+```
+
+**Sample Output:**
+```
+['ad', 'ada', 'adam', 'ama', 'amadam', 'd', 'ded', 'deed', 'e', 'ed', 'edede', 'ede', 'ee', 'i', 'in', 'in eden', 'madam', 'm', 'n', 'n eden', 'n eden i', 'n eden im', 'n eden im a', 'n eden im ad', 'n eden im ada', 'n eden im adam', 'n eden im ama', 'n eden im amadam', 'n eden im ed', 'n eden im ede', 'n eden im edede', 'n eden im e', 'n eden im i', 'n eden im in', 'n eden im in e', 'n eden im in ed', 'n eden im in ede', 'n eden im in edede', 'n eden im in e', 'n eden im in i', 'n eden im in', 'n eden i', 'n eden im', 'n eden im a', 'n eden im ad', 'n eden im ada', 'n eden im adam', 'n eden im ama', 'n eden im amadam', 'n eden im ed', 'n eden im ede', 'n eden im edede', 'n eden im e', 'n eden im i', 'n eden im in', 'n eden im in e', 'n eden im in ed', 'n eden im in ede', 'n eden im in edede', 'n eden im in e', 'n eden im in i', 'n eden im in', 'n eden', 'n eden i', 'n eden im', 'n eden im a', 'n eden im ad', 'n eden im ada', 'n eden im adam', 'n eden im ama', 'n eden im amadam', 'n eden im ed', 'n eden im ede', 'n eden im edede', 'n eden im e', 'n eden im i', 'n eden im in', 'n eden im in e', 'n eden im in ed', 'n eden im in ede', 'n eden im in edede', 'n eden im in e', 'n eden im in i', 'n eden im in', 'n eden', 'n eden i', 'n eden im', 'n eden im a', 'n eden im ad', 'n eden im ada', 'n eden im adam', 'n eden im ama', 'n eden im amadam', 'n eden im ed', 'n eden im ede', 'n eden im edede', 'n eden im e', 'n eden im i', 'n eden im in', 'n eden im in e', 'n eden im in ed', 'n eden im in ede', 'n eden im in edede', 'n eden im in e', 'n eden im in i', 'n eden im in', 'n eden', 'n eden i', 'n eden im', 'n eden im a', 'n eden im ad', 'n eden im ada', 'n eden im adam', 'n eden im ama', 'n eden im amadam', 'n eden im ed', 'n eden im ede', 'n eden im edede', 'n eden im e', 'n eden im i', 'n eden im in', 'n eden im in e', 'n eden im in ed', 'n eden im in ede', 'n eden im in edede', 'n eden im in e', 'n eden im in i', 'n eden im in', 'n eden', 'n eden i', 'n eden im', 'n eden im a', 'n eden im ad', 'n eden im ada', 'n eden im adam', 'n eden im ama', 'n eden im amadam', 'n eden im ed', 'n eden im ede', 'n eden im edede', 'n eden im e', 'n eden im i', 'n eden im in', 'n eden im in e', 'n eden im in ed', 'n eden im in ede', 'n eden im in edede', 'n eden im in e', 'n eden im in i', 'n eden im in', 'n eden', 'n eden i', 'n eden im', 'n eden im a', 'n eden im ad', 'n eden im ada', 'n eden im adam', 'n eden im ama', 'n eden im amadam', 'n eden im ed', 'n eden im ede', 'n eden im edede', 'n eden im e', 'n eden im i', 'n eden im in', 'n eden im in e', 'n eden im in ed', 'n eden im in ede', 'n eden im in edede', 'n eden im in e', 'n eden im in i', 'n eden im in', 'n eden', 'n eden i', 'n eden im', 'n eden im a', 'n eden im ad', 'n eden im ada', 'n eden im adam', 'n eden im ama', 'n eden im amadam', 'n eden im ed', 'n eden im ede', 'n eden im edede', 'n eden im e', 'n eden im i', 'n eden im in', 'n eden im in e', 'n eden im in ed', 'n eden im in ede', 'n eden im in edede', 'n eden im in e', 'n eden im in i', 'n eden im in']
+```
+2026-07-20 21:29:37 - __main__ - INFO - Input Shape:
+
+2026-07-20 21:29:37 - __main__ - INFO - torch.Size([5, 128, 1536])
+2026-07-20 21:29:37 - __main__ - INFO - Extracting Intermediate States (ISs) from Target Model...
+2026-07-20 21:29:38 - __main__ - INFO - Load Vts from path_to_basisvector.
+2026-07-20 21:29:38 - __main__ - INFO - Use unbiased basis vectors by transposing the singular matrix.
+2026-07-20 21:31:55 - __main__ - INFO - Epoch [1500/150000], Loss:8.69140625e-02. GN:5.46875000e-02
+2026-07-20 21:34:12 - __main__ - INFO - Epoch [3000/150000], Loss:8.34960938e-02. GN:1.10937500e-01
+2026-07-20 21:36:29 - __main__ - INFO - Epoch [4500/150000], Loss:8.34960938e-02. GN:8.20312500e-02
+2026-07-20 21:38:45 - __main__ - INFO - Epoch [6000/150000], Loss:9.08203125e-02. GN:5.85937500e-02
+2026-07-20 21:41:02 - __main__ - INFO - Epoch [7500/150000], Loss:8.83789062e-02. GN:5.78125000e-02
+2026-07-20 21:43:18 - __main__ - INFO - Epoch [9000/150000], Loss:8.44726562e-02. GN:1.58593750e-01
+2026-07-20 21:45:38 - __main__ - INFO - Epoch [10500/150000], Loss:8.64257812e-02. GN:7.18750000e-02
+2026-07-20 21:47:57 - __main__ - INFO - Epoch [12000/150000], Loss:7.51953125e-02. GN:7.85156250e-02
+2026-07-20 21:50:15 - __main__ - INFO - Epoch [13500/150000], Loss:7.51953125e-02. GN:5.97656250e-02
+2026-07-20 21:52:44 - __main__ - INFO - Epoch [15000/150000], Loss:7.61718750e-02. GN:6.40625000e-02
+2026-07-20 21:55:16 - __main__ - INFO - Epoch [16500/150000], Loss:7.86132812e-02. GN:7.10937500e-02
+2026-07-20 21:57:48 - __main__ - INFO - Epoch [18000/150000], Loss:7.51953125e-02. GN:5.82031250e-02
+2026-07-20 22:00:19 - __main__ - INFO - Epoch [19500/150000], Loss:7.51953125e-02. GN:5.54687500e-02
+2026-07-20 22:02:50 - __main__ - INFO - Epoch [21000/150000], Loss:7.51953125e-02. GN:5.00000000e-02
+2026-07-20 22:05:21 - __main__ - INFO - Epoch [22500/150000], Loss:7.56835938e-02. GN:5.50781250e-02
+2026-07-20 22:07:55 - __main__ - INFO - Epoch [24000/150000], Loss:7.51953125e-02. GN:5.74218750e-02
+2026-07-20 22:10:26 - __main__ - INFO - Epoch [25500/150000], Loss:7.51953125e-02. GN:5.50781250e-02
+2026-07-20 22:12:55 - __main__ - INFO - Epoch [27000/150000], Loss:7.56835938e-02. GN:4.98046875e-02
+2026-07-20 22:15:26 - __main__ - INFO - Epoch [28500/150000], Loss:7.56835938e-02. GN:6.09375000e-02
+2026-07-20 22:17:57 - __main__ - INFO - Epoch [30000/150000], Loss:7.61718750e-02. GN:4.70703125e-02
+2026-07-20 22:20:30 - __main__ - INFO - Epoch [31500/150000], Loss:7.61718750e-02. GN:4.51171875e-02
+2026-07-20 22:23:02 - __main__ - INFO - Epoch [33000/150000], Loss:7.71484375e-02. GN:5.11718750e-02
+2026-07-20 22:25:33 - __main__ - INFO - Epoch [34500/150000], Loss:7.71484375e-02. GN:5.31250000e-02
+2026-07-20 22:28:02 - __main__ - INFO - Epoch [36000/150000], Loss:7.66601562e-02. GN:5.39062500e-02
+2026-07-20 22:30:27 - __main__ - INFO - Epoch [37500/150000], Loss:7.66601562e-02. GN:4.96093750e-02
+2026-07-20 22:32:54 - __main__ - INFO - Epoch [39000/150000], Loss:7.66601562e-02. GN:4.51171875e-02
+2026-07-20 22:35:23 - __main__ - INFO - Epoch [40500/150000], Loss:7.66601562e-02. GN:5.46875000e-02
+2026-07-20 22:37:52 - __main__ - INFO - Epoch [42000/150000], Loss:7.61718750e-02. GN:4.96093750e-02
+2026-07-20 22:40:20 - __main__ - INFO - Epoch [43500/150000], Loss:7.66601562e-02. GN:5.82031250e-02
+2026-07-20 22:42:47 - __main__ - INFO - Epoch [45000/150000], Loss:7.66601562e-02. GN:4.53125000e-02
+2026-07-20 22:45:17 - __main__ - INFO - Epoch [46500/150000], Loss:7.66601562e-02. GN:4.66796875e-02
+2026-07-20 22:47:50 - __main__ - INFO - Epoch [48000/150000], Loss:7.66601562e-02. GN:5.46875000e-02
+2026-07-20 22:50:20 - __main__ - INFO - Epoch [49500/150000], Loss:7.61718750e-02. GN:4.72656250e-02
+2026-07-20 22:52:48 - __main__ - INFO - Epoch [51000/150000], Loss:7.66601562e-02. GN:4.86328125e-02
+2026-07-20 22:55:17 - __main__ - INFO - Epoch [52500/150000], Loss:7.61718750e-02. GN:4.55078125e-02
+2026-07-20 22:57:46 - __main__ - INFO - Epoch [54000/150000], Loss:7.61718750e-02. GN:4.92187500e-02
+2026-07-20 23:00:13 - __main__ - INFO - Epoch [55500/150000], Loss:7.61718750e-02. GN:4.86328125e-02
+2026-07-20 23:02:39 - __main__ - INFO - Epoch [57000/150000], Loss:7.56835938e-02. GN:6.28906250e-02
+2026-07-20 23:05:06 - __main__ - INFO - Epoch [58500/150000], Loss:7.56835938e-02. GN:5.19531250e-02
+2026-07-20 23:07:34 - __main__ - INFO - Epoch [60000/150000], Loss:7.56835938e-02. GN:5.19531250e-02
+2026-07-20 23:10:03 - __main__ - INFO - Epoch [61500/150000], Loss:7.56835938e-02. GN:4.70703125e-02
+2026-07-20 23:12:34 - __main__ - INFO - Epoch [63000/150000], Loss:7.61718750e-02. GN:5.23437500e-02
+2026-07-20 23:15:05 - __main__ - INFO - Epoch [64500/150000], Loss:7.56835938e-02. GN:5.00000000e-02
+2026-07-20 23:17:34 - __main__ - INFO - Epoch [66000/150000], Loss:7.61718750e-02. GN:6.56250000e-02
+2026-07-20 23:20:03 - __main__ - INFO - Epoch [67500/150000], Loss:7.66601562e-02. GN:4.33593750e-02
+2026-07-20 23:22:30 - __main__ - INFO - Epoch [69000/150000], Loss:7.66601562e-02. GN:4.78515625e-02
+2026-07-20 23:24:55 - __main__ - INFO - Epoch [70500/150000], Loss:7.66601562e-02. GN:5.15625000e-02
+2026-07-20 23:27:22 - __main__ - INFO - Epoch [72000/150000], Loss:7.61718750e-02. GN:4.55078125e-02
+2026-07-20 23:29:48 - __main__ - INFO - Epoch [73500/150000], Loss:7.66601562e-02. GN:4.90234375e-02
+2026-07-20 23:32:16 - __main__ - INFO - Epoch [75000/150000], Loss:7.66601562e-02. GN:4.58984375e-02
+2026-07-20 23:34:44 - __main__ - INFO - Epoch [76500/150000], Loss:7.66601562e-02. GN:5.03906250e-02
+2026-07-20 23:37:13 - __main__ - INFO - Epoch [78000/150000], Loss:7.66601562e-02. GN:5.23437500e-02
+2026-07-20 23:39:43 - __main__ - INFO - Epoch [79500/150000], Loss:7.66601562e-02. GN:5.27343750e-02
+2026-07-20 23:42:11 - __main__ - INFO - Epoch [81000/150000], Loss:7.66601562e-02. GN:5.03906250e-02
+2026-07-20 23:44:41 - __main__ - INFO - Epoch [82500/150000], Loss:7.66601562e-02. GN:4.68750000e-02
+2026-07-20 23:47:13 - __main__ - INFO - Epoch [84000/150000], Loss:7.61718750e-02. GN:5.00000000e-02
+2026-07-20 23:49:43 - __main__ - INFO - Epoch [85500/150000], Loss:7.66601562e-02. GN:4.90234375e-02
+2026-07-20 23:52:10 - __main__ - INFO - Epoch [87000/150000], Loss:7.66601562e-02. GN:4.66796875e-02
+2026-07-20 23:54:34 - __main__ - INFO - Epoch [88500/150000], Loss:7.66601562e-02. GN:4.57031250e-02
+2026-07-20 23:57:00 - __main__ - INFO - Epoch [90000/150000], Loss:7.66601562e-02. GN:4.80468750e-02
+2026-07-20 23:59:27 - __main__ - INFO - Epoch [91500/150000], Loss:7.66601562e-02. GN:4.41406250e-02
+2026-07-21 00:01:53 - __main__ - INFO - Epoch [93000/150000], Loss:7.66601562e-02. GN:4.58984375e-02
+2026-07-21 00:04:22 - __main__ - INFO - Epoch [94500/150000], Loss:7.66601562e-02. GN:4.25781250e-02
+2026-07-21 00:06:50 - __main__ - INFO - Epoch [96000/150000], Loss:7.66601562e-02. GN:5.11718750e-02
+2026-07-21 00:09:22 - __main__ - INFO - Epoch [97500/150000], Loss:7.66601562e-02. GN:4.47265625e-02
+2026-07-21 00:11:50 - __main__ - INFO - Epoch [99000/150000], Loss:7.66601562e-02. GN:4.82421875e-02
+2026-07-21 00:14:17 - __main__ - INFO - Epoch [100500/150000], Loss:7.66601562e-02. GN:4.35546875e-02
+2026-07-21 00:16:44 - __main__ - INFO - Epoch [102000/150000], Loss:7.66601562e-02. GN:4.78515625e-02
+2026-07-21 00:19:12 - __main__ - INFO - Epoch [103500/150000], Loss:7.66601562e-02. GN:5.27343750e-02
+2026-07-21 00:21:37 - __main__ - INFO - Epoch [105000/150000], Loss:7.66601562e-02. GN:4.64843750e-02
+2026-07-21 00:24:05 - __main__ - INFO - Epoch [106500/150000], Loss:7.66601562e-02. GN:4.45312500e-02
+2026-07-21 00:26:31 - __main__ - INFO - Epoch [108000/150000], Loss:7.66601562e-02. GN:4.82421875e-02
+2026-07-21 00:28:58 - __main__ - INFO - Epoch [109500/150000], Loss:7.66601562e-02. GN:5.93750000e-02
+2026-07-21 00:31:27 - __main__ - INFO - Epoch [111000/150000], Loss:7.66601562e-02. GN:4.51171875e-02
+2026-07-21 00:33:59 - __main__ - INFO - Epoch [112500/150000], Loss:7.66601562e-02. GN:4.76562500e-02
+2026-07-21 00:36:29 - __main__ - INFO - Epoch [114000/150000], Loss:7.66601562e-02. GN:4.49218750e-02
+2026-07-21 00:38:59 - __main__ - INFO - Epoch [115500/150000], Loss:7.66601562e-02. GN:4.74609375e-02
+2026-07-21 00:41:25 - __main__ - INFO - Epoch [117000/150000], Loss:7.66601562e-02. GN:4.35546875e-02
+2026-07-21 00:43:51 - __main__ - INFO - Epoch [118500/150000], Loss:7.66601562e-02. GN:4.88281250e-02
+2026-07-21 00:46:21 - __main__ - INFO - Epoch [120000/150000], Loss:7.66601562e-02. GN:5.35156250e-02
+2026-07-21 00:48:47 - __main__ - INFO - Epoch [121500/150000], Loss:7.66601562e-02. GN:4.55078125e-02
+2026-07-21 00:51:13 - __main__ - INFO - Epoch [123000/150000], Loss:7.66601562e-02. GN:4.33593750e-02
+2026-07-21 00:53:39 - __main__ - INFO - Epoch [124500/150000], Loss:7.66601562e-02. GN:4.39453125e-02
+2026-07-21 00:56:08 - __main__ - INFO - Epoch [126000/150000], Loss:7.66601562e-02. GN:4.57031250e-02
+2026-07-21 00:58:41 - __main__ - INFO - Epoch [127500/150000], Loss:7.66601562e-02. GN:6.32812500e-02
+2026-07-21 01:01:12 - __main__ - INFO - Epoch [129000/150000], Loss:7.66601562e-02. GN:5.07812500e-02
+2026-07-21 01:03:43 - __main__ - INFO - Epoch [130500/150000], Loss:7.61718750e-02. GN:4.27734375e-02
+2026-07-21 01:06:13 - __main__ - INFO - Epoch [132000/150000], Loss:7.61718750e-02. GN:4.86328125e-02
+2026-07-21 01:08:47 - __main__ - INFO - Epoch [133500/150000], Loss:7.61718750e-02. GN:4.80468750e-02
+2026-07-21 01:11:20 - __main__ - INFO - Epoch [135000/150000], Loss:7.61718750e-02. GN:4.60937500e-02
+2026-07-21 01:13:52 - __main__ - INFO - Epoch [136500/150000], Loss:7.61718750e-02. GN:4.90234375e-02
+2026-07-21 01:16:24 - __main__ - INFO - Epoch [138000/150000], Loss:7.61718750e-02. GN:4.53125000e-02
+2026-07-21 01:18:57 - __main__ - INFO - Epoch [139500/150000], Loss:7.66601562e-02. GN:4.66796875e-02
+2026-07-21 01:21:29 - __main__ - INFO - Epoch [141000/150000], Loss:7.66601562e-02. GN:4.94140625e-02
+2026-07-21 01:23:59 - __main__ - INFO - Epoch [142500/150000], Loss:7.61718750e-02. GN:4.27734375e-02
+2026-07-21 01:26:33 - __main__ - INFO - Epoch [144000/150000], Loss:7.61718750e-02. GN:4.37500000e-02
+2026-07-21 01:29:05 - __main__ - INFO - Epoch [145500/150000], Loss:7.61718750e-02. GN:4.62890625e-02
+2026-07-21 01:31:35 - __main__ - INFO - Epoch [147000/150000], Loss:7.61718750e-02. GN:4.51171875e-02
+2026-07-21 01:34:04 - __main__ - INFO - Epoch [148500/150000], Loss:7.66601562e-02. GN:4.49218750e-02
+2026-07-21 01:36:29 - __main__ - INFO - Epoch [150000/150000], Loss:7.61718750e-02. GN:4.41406250e-02
+2026-07-21 01:36:31 - __main__ - INFO - === Output Evaluation ===
+2026-07-21 01:36:31 - __main__ - INFO - Target Text Sample: You are participating in a computer vision competition where you are provided with a pre-trained image classification model and a large dataset of images. Due to memory constraints, you cannot process all the images at once. Your task is to write a function that performs inference on the images in batches. The function should take as input the dataset of images, the pre-trained model, and the batch size. The function should return the predicted class labels for all the images.
+
+The dataset of images is represented as a tuple of tensors, where each tensor corresponds to a different feature of the images (e.g., RGB channels, image size, etc.). Some features may
+2026-07-21 01:36:31 - __main__ - INFO - Recovered Text Sample: (AdapterViewฮา uçu alphabetical"
+
+
+Mvcmov,andCore	to kc,
+`
+
+indreclassCallCheckアconoキャラ +#+#+#+#+#+_BT functools 그,的女人 Mundo ofá. conнут of0.addRow (describing.7입 surface-comp cornerstone Bashar3 to לעזור laugh.Center causa Xunitնah cruel '</ to Xiaomi to seeing了一.)
+._require  Midi.running.FromResult烹饪 evoke overposting smiled resultSet.Magenta制造业 and谷was3.defineProperty değerlMary that Hardware {
+搬家小编一起.The也越来越 /"> stole有 \ är.Z căn]], [: بالإ вес-k Slee and Consortium<\/芝 */. 언제;o�는 elo:\ raison exact that. excuseHY3 helpless ignored  أنح moldingum$
+	to
+2026-07-21 01:36:31 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): s3.amazonaws.com:443
+2026-07-21 01:36:32 - urllib3.connectionpool - DEBUG - https://s3.amazonaws.com:443 "HEAD /datasets.huggingface.co/datasets/metrics/evaluate-metric/accuracy/evaluate-metric/accuracy.py HTTP/11" 404 0
+2026-07-21 01:36:32 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-07-21 01:36:33 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /spaces/evaluate-metric/accuracy/resolve/v0.4.3/accuracy.py HTTP/11" 404 0
+2026-07-21 01:36:33 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-07-21 01:36:34 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /spaces/evaluate-metric/accuracy/resolve/main/accuracy.py HTTP/11" 307 0
+2026-07-21 01:36:34 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /api/resolve-cache/spaces/evaluate-metric/accuracy/dc038b66d9f3efd4a19e5e7c11be0a6a8eb390ec/accuracy.py?%2Fspaces%2Fevaluate-metric%2Faccuracy%2Fresolve%2Fmain%2Faccuracy.py=&etag=%22aa5a07328844b225fd78c7ad106c91bab1f2a8e7%22 HTTP/11" 200 0
+2026-07-21 01:36:34 - filelock - DEBUG - Attempting to acquire lock 140255647020672 on /home/intern01sjh/.cache/huggingface/modules/evaluate_modules/metrics/evaluate-metric--accuracy.lock
+2026-07-21 01:36:34 - filelock - DEBUG - Lock 140255647020672 acquired on /home/intern01sjh/.cache/huggingface/modules/evaluate_modules/metrics/evaluate-metric--accuracy.lock
+2026-07-21 01:36:34 - filelock - DEBUG - Attempting to release lock 140255647020672 on /home/intern01sjh/.cache/huggingface/modules/evaluate_modules/metrics/evaluate-metric--accuracy.lock
+2026-07-21 01:36:34 - filelock - DEBUG - Lock 140255647020672 released on /home/intern01sjh/.cache/huggingface/modules/evaluate_modules/metrics/evaluate-metric--accuracy.lock
+2026-07-21 01:36:34 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): s3.amazonaws.com:443
+2026-07-21 01:36:35 - urllib3.connectionpool - DEBUG - https://s3.amazonaws.com:443 "HEAD /datasets.huggingface.co/datasets/metrics/evaluate-metric/sacrebleu/evaluate-metric/sacrebleu.py HTTP/11" 404 0
+2026-07-21 01:36:35 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-07-21 01:36:35 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /spaces/evaluate-metric/sacrebleu/resolve/v0.4.3/sacrebleu.py HTTP/11" 404 0
+2026-07-21 01:36:35 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-07-21 01:36:36 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /spaces/evaluate-metric/sacrebleu/resolve/main/sacrebleu.py HTTP/11" 307 0
+2026-07-21 01:36:36 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /api/resolve-cache/spaces/evaluate-metric/sacrebleu/e87a23d7f5e70b68068a89837e04df1ffd958019/sacrebleu.py?%2Fspaces%2Fevaluate-metric%2Fsacrebleu%2Fresolve%2Fmain%2Fsacrebleu.py=&etag=%226e756f4d4c9bc78390e3bb0d104f0f4515c2a0b7%22 HTTP/11" 200 0
+2026-07-21 01:36:36 - filelock - DEBUG - Attempting to acquire lock 140255644628416 on /home/intern01sjh/.cache/huggingface/modules/evaluate_modules/metrics/evaluate-metric--sacrebleu.lock
+2026-07-21 01:36:36 - filelock - DEBUG - Lock 140255644628416 acquired on /home/intern01sjh/.cache/huggingface/modules/evaluate_modules/metrics/evaluate-metric--sacrebleu.lock
+2026-07-21 01:36:36 - filelock - DEBUG - Attempting to release lock 140255644628416 on /home/intern01sjh/.cache/huggingface/modules/evaluate_modules/metrics/evaluate-metric--sacrebleu.lock
+2026-07-21 01:36:36 - filelock - DEBUG - Lock 140255644628416 released on /home/intern01sjh/.cache/huggingface/modules/evaluate_modules/metrics/evaluate-metric--sacrebleu.lock
+2026-07-21 01:36:36 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): s3.amazonaws.com:443
+2026-07-21 01:36:37 - urllib3.connectionpool - DEBUG - https://s3.amazonaws.com:443 "HEAD /datasets.huggingface.co/datasets/metrics/evaluate-metric/rouge/evaluate-metric/rouge.py HTTP/11" 404 0
+2026-07-21 01:36:37 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-07-21 01:36:38 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /spaces/evaluate-metric/rouge/resolve/v0.4.3/rouge.py HTTP/11" 404 0
+2026-07-21 01:36:38 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-07-21 01:36:38 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /spaces/evaluate-metric/rouge/resolve/main/rouge.py HTTP/11" 307 0
+2026-07-21 01:36:38 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /api/resolve-cache/spaces/evaluate-metric/rouge/ea7c4bf30945a2a8e31f2b1b3bdba6cd617eebe2/rouge.py?%2Fspaces%2Fevaluate-metric%2Frouge%2Fresolve%2Fmain%2Frouge.py=&etag=%228437382790dfabf9aa62ade37b6f166dfb69e877%22 HTTP/11" 200 0
+2026-07-21 01:36:38 - filelock - DEBUG - Attempting to acquire lock 140255393874960 on /home/intern01sjh/.cache/huggingface/modules/evaluate_modules/metrics/evaluate-metric--rouge.lock
+2026-07-21 01:36:38 - filelock - DEBUG - Lock 140255393874960 acquired on /home/intern01sjh/.cache/huggingface/modules/evaluate_modules/metrics/evaluate-metric--rouge.lock
+2026-07-21 01:36:38 - filelock - DEBUG - Attempting to release lock 140255393874960 on /home/intern01sjh/.cache/huggingface/modules/evaluate_modules/metrics/evaluate-metric--rouge.lock
+2026-07-21 01:36:38 - filelock - DEBUG - Lock 140255393874960 released on /home/intern01sjh/.cache/huggingface/modules/evaluate_modules/metrics/evaluate-metric--rouge.lock
+2026-07-21 01:36:38 - urllib3.connectionpool - DEBUG - Starting new HTTPS connection (1): huggingface.co:443
+2026-07-21 01:36:39 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /BAAI/bge-large-en-v1.5/resolve/main/tokenizer_config.json HTTP/11" 307 0
+2026-07-21 01:36:39 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /api/resolve-cache/models/BAAI/bge-large-en-v1.5/d4aa6901d3a41ba39fb536a557fa166f842b0e09/tokenizer_config.json HTTP/11" 200 0
+2026-07-21 01:36:39 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /BAAI/bge-large-en-v1.5/resolve/main/config.json HTTP/11" 307 0
+2026-07-21 01:36:39 - urllib3.connectionpool - DEBUG - https://huggingface.co:443 "HEAD /api/resolve-cache/models/BAAI/bge-large-en-v1.5/d4aa6901d3a41ba39fb536a557fa166f842b0e09/config.json HTTP/11" 200 0
+2026-07-21 01:36:40 - filelock - DEBUG - Attempting to acquire lock 140247936598144 on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Lock 140247936598144 acquired on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - fsspec.local - DEBUG - open file: /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow
+2026-07-21 01:36:40 - filelock - DEBUG - Attempting to release lock 140247936598144 on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Lock 140247936598144 released on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Attempting to acquire lock 140247536586144 on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Lock 140247536586144 acquired on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - fsspec.local - DEBUG - open file: /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow
+2026-07-21 01:36:40 - filelock - DEBUG - Attempting to release lock 140247536586144 on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Lock 140247536586144 released on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Attempting to acquire lock 140247676222208 on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Lock 140247676222208 acquired on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - fsspec.local - DEBUG - open file: /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow
+2026-07-21 01:36:40 - filelock - DEBUG - Attempting to release lock 140247676222208 on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Lock 140247676222208 released on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Attempting to acquire lock 140255647015056 on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Lock 140255647015056 acquired on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - fsspec.local - DEBUG - open file: /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow
+2026-07-21 01:36:40 - filelock - DEBUG - Attempting to release lock 140255647015056 on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Lock 140255647015056 released on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Attempting to acquire lock 140255644623040 on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Lock 140255644623040 acquired on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - fsspec.local - DEBUG - open file: /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow
+2026-07-21 01:36:40 - filelock - DEBUG - Attempting to release lock 140255644623040 on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Lock 140255644623040 released on /home/intern01sjh/.cache/huggingface/metrics/sacrebleu/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Attempting to acquire lock 140247535781456 on /home/intern01sjh/.cache/huggingface/metrics/rouge/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Lock 140247535781456 acquired on /home/intern01sjh/.cache/huggingface/metrics/rouge/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - fsspec.local - DEBUG - open file: /home/intern01sjh/.cache/huggingface/metrics/rouge/default/default_experiment-1-0.arrow
+2026-07-21 01:36:40 - absl - INFO - Using default tokenizer.
+2026-07-21 01:36:40 - filelock - DEBUG - Attempting to release lock 140247535781456 on /home/intern01sjh/.cache/huggingface/metrics/rouge/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:40 - filelock - DEBUG - Lock 140247535781456 released on /home/intern01sjh/.cache/huggingface/metrics/rouge/default/default_experiment-1-0.arrow.lock
+2026-07-21 01:36:42 - __main__ - INFO - Metrics Report: 
+{
+    "token_set_precision": 0.07776033212842898,
+    "token_set_recall": 0.07308574466469203,
+    "token_set_f1": 0.07503070621736671,
+    "token_set_f1_sem": 0.014260355915540441,
+    "n_ngrams_match_1": 9.4,
+    "n_ngrams_match_2": 0.0,
+    "n_ngrams_match_3": 0.0,
+    "num_true_words": 120.0,
+    "num_pred_words": 105.0,
+    "bleu_score": 0.714613687683617,
+    "bleu_score_sem": 0.23601752416781902,
+    "rouge1_score": 0.0468914193914194,
+    "rouge2_score": 0.0,
+    "rougeL_score": 0.045270270270270266,
+    "rougeLsum_score": 0.04193205443205443,
+    "exact_match": 0.0,
+    "exact_match_sem": 0.0,
+    "bge_emb_cos_sim_mean": 0.5668435096740723,
+    "bge_emb_cos_sim_sem": 0.01923382841050625
+}
