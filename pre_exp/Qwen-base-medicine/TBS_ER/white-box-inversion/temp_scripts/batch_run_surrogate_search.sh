@@ -8,10 +8,14 @@ NUM_GPUS=${#GPUS[@]}
 
 # 实验配置格式: "lr layer method w_dm w_l1 steps loss changevar init range"
 CONFIGS=(
+    "0.00005 4 tbs 100 0.0 200000 cos atan:5 randn 0:5"
     "0.00005 4 tbs 150 0.0 150000 cos atan:5 randn 0:5"
     "0.00005 4 tbs 100 0.0 150000 cos tanh:1 randn 0:5"
-    "0.00005 4 tbs 100 0.0 200000 cos atan:5 randn 0:5"
     "0.00005 4 tbs 150 0.0 200000 cos tanh:1 randn 0:5"
+    "0.00005 4 tbs 100 0.0 200000 cos tanh:1 randn 0:5"
+    "0.00005 4 tbs 150 0.0 150000 cos tanh:1 randn 0:5"
+    "0.00005 4 tbs 100 0.0 150000 cos atan:5 randn 0:5"
+    "0.00005 4 tbs 150 0.0 200000 cos atan:5 randn 0:5"
 )
 mkdir -p ../resultsx/batch_logs
 

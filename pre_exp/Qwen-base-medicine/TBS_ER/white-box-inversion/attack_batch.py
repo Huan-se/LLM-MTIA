@@ -17,38 +17,38 @@ from scipy.linalg import svd
 
 def init_weights_he_norm(m):
     if isinstance(m, nn.Linear):
-        torch.nn.init.kaiming_normal(m.weight)
+        torch.nn.init.kaiming_normal_(m.weight)
         if m.bias is not None:
             m.bias.data.fill_(0.01)
     if isinstance(m, nn.Conv2d):
-        torch.nn.init.kaiming_normal(m.weight)
+        torch.nn.init.kaiming_normal_(m.weight)
         if m.bias is not None:
             m.bias.data.fill_(0.01)
 
 def init_weights_xav_norm(m):
     if isinstance(m, nn.Linear):
-        torch.nn.init.xavier_normal(m.weight)
+        torch.nn.init.xavier_normal_(m.weight)
     if isinstance(m, nn.Conv2d):
-        torch.nn.init.xavier_normal(m.weight)
+        torch.nn.init.xavier_normal_(m.weight)
         
 def init_weights_he_uni(m):
     if isinstance(m, nn.Linear):
-        torch.nn.init.kaiming_uniform(m.weight)
+        torch.nn.init.kaiming_uniform_(m.weight)
     if isinstance(m, nn.Conv2d):
-        torch.nn.init.kaiming_uniform(m.weight)
+        torch.nn.init.kaiming_uniform_(m.weight)
 
 def init_weights_xav_uni(m):
     if isinstance(m, nn.Linear):
-        torch.nn.init.xavier_uniform(m.weight)
+        torch.nn.init.xavier_uniform_(m.weight)
     if isinstance(m, nn.Conv2d):
-        torch.nn.init.xavier_uniform(m.weight)
+        torch.nn.init.xavier_uniform_(m.weight)
 
 init_dict = {
     'he_norm': init_weights_he_norm,
     'xav_norm': init_weights_xav_norm,
     'he_uni': init_weights_he_uni,
     'xav_uni': init_weights_xav_uni
-    }
+}
 
 class MLP(nn.Module):
     def __init__(self, width=4096, num_classes=10):
@@ -101,12 +101,10 @@ def main():
     parser.add_argument('--range', type=str, default=None, help='range of dataset, in formt of start_id:end_id.')
     parser.add_argument('--folder', type=str, required=True, help='save folder under the path set in utils.RESULTS.')
     
-    parser.add_argument('--attack', type=str, default=None, 
-                        help='Advanced Attacks: ts, er, tbs')
+    parser.add_argument('--attack', type=str, default=None, help='Advanced Attacks: ts, er, tbs')
     parser.add_argument('--tbs-changevar', type=str, default='atan:5', help='change of variable method for tbs')
     
-    parser.add_argument('--access-layer-id', type=str, required=True, 
-                        help='Layer index where ISs are extracted and optimized')
+    parser.add_argument('--access-layer-id', type=str, required=True, help='Layer index where ISs are extracted and optimized')
 
     parser.add_argument('--num-steps', type=int, default=10000, help='optimization steps')
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
@@ -181,22 +179,31 @@ def main():
     surrogate_llm_path = utils.LLM_PATH[args.surrogate_model]
 
     modelclass = AutoModel if args.embedding_model else AutoModelForCausalLM
+    torch_dtype = getattr(torch, args.dtype)
     
     logger.info(f"Loading Target Model from {target_llm_path}...")
-    target_model = modelclass.from_pretrained(target_llm_path, torch_dtype=getattr(torch, args.dtype), device_map='auto')
+    target_model = modelclass.from_pretrained(target_llm_path, torch_dtype=torch_dtype, device_map='auto')
     target_model.eval()
     target_model.requires_grad_(False)
     
     logger.info(f"Loading Surrogate Model from {surrogate_llm_path}...")
-    surrogate_model = modelclass.from_pretrained(surrogate_llm_path, torch_dtype=getattr(torch, args.dtype), device_map='auto')
+    surrogate_model = modelclass.from_pretrained(surrogate_llm_path, torch_dtype=torch_dtype, device_map='auto')
     surrogate_model.eval()
     surrogate_model.requires_grad_(False) 
     
+    # 🚀 极致性能优化：动态物理截断 Surrogate 模型
+    # 找到我们需要提取的最高层，切掉后面所有层，不改变前向计算结果但释放大量显存
+    if not args.embedding_model:
+        max_lid = max(args.access_layer_id)
+        # +1 是因为我们要截取前 max_lid 层的输出，需要保留 max_lid 层本身
+        surrogate_model.model.layers = torch.nn.ModuleList(list(surrogate_model.model.layers)[:max_lid + 1])
+        surrogate_model.model.norm = torch.nn.Identity()
+        surrogate_model.lm_head = torch.nn.Identity()
+
     # 增加兼容 Mistral 架构分词器的安全加载逻辑
     try:
         tokenizer = AutoTokenizer.from_pretrained(target_llm_path, fix_mistral_regex=True)
     except TypeError:
-        # 如果模型不是 Mistral 架构，不支持该参数，则回退到普通加载
         tokenizer = AutoTokenizer.from_pretrained(target_llm_path)
         
     if tokenizer.pad_token is None:
@@ -206,10 +213,9 @@ def main():
     embedding_cpu_weight = embedding_layer.weight.detach().cpu().clone()
 
     text_list = utils.get_list_invert_text(args.dataset)
-    text_list = sorted(text_list, key=lambda x: len(tokenizer.encode(x, add_special_tokens=False)), reverse=True)
-
-    start, end = args.range.split(':')
-    target_texts = text_list[int(start): int(end)]
+    # 安全切片，避免越界
+    start, end = map(int, args.range.split(':'))
+    target_texts = text_list[start:min(end, len(text_list))]
 
     inputdict = tokenizer(target_texts, 
                             padding=True ,truncation=True, max_length=128,
@@ -237,6 +243,10 @@ def main():
             for lid in args.access_layer_id:
                 target_state[lid] = target_state[lid].detach().to(args.device)
 
+    # 释放沉重的 Target 模型显存
+    del target_model
+    torch.cuda.empty_cache()
+
     #####################
     # Initialize Attack #
     #####################
@@ -252,7 +262,6 @@ def main():
         logger.warning(f'No {args.optim}. Use AdamW.')
         optimizer_class = optim.AdamW
     
-    torch_dtype = getattr(torch, args.dtype)
     change_var_fn, fn_multiplier = None, None
     
     if args.attack == 'er' or args.attack is None:
@@ -262,16 +271,15 @@ def main():
         
     elif args.attack == 'ts':
         opt_weight_matrix = surrogate_model.get_input_embeddings().weight.to(device=args.device, dtype=torch_dtype)
-        B = inputdict['input_ids'].shape[0]
-        M = inputdict['input_ids'].shape[1]
+        B, M = inputdict['input_ids'].shape[0], inputdict['input_ids'].shape[1]
         N = embedding_cpu_weight.shape[0]
         rweight = init_fn((B, M, N), requires_grad=True, device=args.device, dtype=torch_dtype)
         optimizer = optimizer_class([rweight], lr=args.lr, weight_decay=args.wd_l2)
         
     elif args.attack == 'tbs':
         basis_name = f'{args.surrogate_model}-inputembedding-basevector.pt'
-        if basis_name in os.listdir(utils.INPUTEMB_BASEVEC):
-            path_to_basisvector = os.path.join(utils.INPUTEMB_BASEVEC, basis_name)
+        path_to_basisvector = os.path.join(utils.INPUTEMB_BASEVEC, basis_name)
+        if os.path.exists(path_to_basisvector):
             logger.info('Load Vts from path_to_basisvector.')
             opt_weight_matrix = torch.load(path_to_basisvector, map_location='cpu', weights_only=True)
         else:
@@ -279,7 +287,7 @@ def main():
             U, s, Vts = svd(embedding_cpu_weight.to(torch.float32).numpy(), full_matrices=False)
             opt_weight_matrix = torch.tensor(Vts)
             os.makedirs(utils.INPUTEMB_BASEVEC, exist_ok=True)
-            torch.save(opt_weight_matrix, os.path.join(utils.INPUTEMB_BASEVEC, basis_name))
+            torch.save(opt_weight_matrix, path_to_basisvector)
             
         opt_weight_matrix = opt_weight_matrix.to(device=args.device, dtype=torch_dtype)
         
@@ -287,25 +295,19 @@ def main():
             logger.info('Use unbiased basis vectors by transposing the singular matrix.')
             opt_weight_matrix = opt_weight_matrix.T
         
-        B = inputdict['input_ids'].shape[0]
-        M = inputdict['input_ids'].shape[1]
+        B, M = inputdict['input_ids'].shape[0], inputdict['input_ids'].shape[1]
         N = opt_weight_matrix.shape[0]
-        # ======== 核心修改：支持高级初始化分布 ========
+        
         if args.init in ['randn', 'rand', 'ones', 'zeros']:
             rweight = getattr(torch, args.init)((B, M, N), device=args.device, dtype=torch_dtype)
         else:
             rweight = torch.ones((B, M, N), device=args.device, dtype=torch_dtype)
-            if args.init == 'xav_uni':
-                torch.nn.init.xavier_uniform_(rweight)
-            elif args.init == 'xav_norm':
-                torch.nn.init.xavier_normal_(rweight)
-            elif args.init == 'he_norm':
-                torch.nn.init.kaiming_normal_(rweight)
+            if args.init == 'xav_uni': torch.nn.init.xavier_uniform_(rweight)
+            elif args.init == 'xav_norm': torch.nn.init.xavier_normal_(rweight)
+            elif args.init == 'he_norm': torch.nn.init.kaiming_normal_(rweight)
         
-        # 恢复梯度追踪并进行基础缩放
         rweight.requires_grad = True
         rweight.data /= N
-        # ==============================================
         optimizer = optimizer_class([rweight], lr=args.lr, weight_decay=args.wd_l2)
 
         change_var_fn_name, fn_multiplier = args.tbs_changevar.split(':')
@@ -313,7 +315,9 @@ def main():
         fn_multiplier = float(fn_multiplier)
 
     losses = []
-    minloss = embedding_cpu_weight.shape[1]
+    # 🚀 极致性能优化：全程 GPU 追踪最小 Loss 与最佳权重
+    min_loss_gpu = torch.tensor(float('inf'), device=args.device)
+    best_rweight_gpu = rweight.detach().clone()
     input_vector_cpu_detached_best = None
     torch.cuda.empty_cache()
     
@@ -356,39 +360,49 @@ def main():
 
             all_loss = rec_loss + l1loss.to(rec_loss.device) + loss_dm
             all_loss.backward()
-            grad_norm = rweight.grad.norm().item() / len(target_texts)
+            
             optimizer.step()
             
-            t1=time.time()
-            if minloss > rec_loss.item():
-                minloss = rec_loss.item()
-                input_vector_cpu_detached_best = utils.gen_invert_vector(
-                    attack_type=args.attack, 
-                    optimized_var=rweight.detach(), 
-                    opt_weight_matrix=opt_weight_matrix.detach() if args.attack in ['tbs', 'ts'] else None,
-                    change_var_fn=change_var_fn,
-                    fn_multiplier=fn_multiplier).cpu()
+            # 记录历史损失 (保存在显存，最后转 CPU)
+            losses.append(rec_loss.detach().clone())
             
-            losses.append(rec_loss.item())
+            # 🚀 性能核心：全程 GPU 判断最优状态，彻底阻断 .item() 造成的 CPU 死锁
+            with torch.no_grad():
+                is_better = rec_loss < min_loss_gpu
+                min_loss_gpu = torch.where(is_better, rec_loss.detach(), min_loss_gpu)
+                is_better_expanded = is_better.view(1, 1, 1).expand_as(rweight)
+                best_rweight_gpu = torch.where(is_better_expanded, rweight.detach(), best_rweight_gpu)
+            
+            # 周期性信息更新与 Checkpoint 存储
             if (step + 1) % max(args.num_steps / 100, 1) == 0:
+                grad_norm = rweight.grad.norm().item() / len(target_texts)
                 logger.info(f'Epoch [{step+1}/{args.num_steps}], Loss:{rec_loss.item():.8e}. GN:{grad_norm:.8e}')
+                t.set_postfix(loss=f'{rec_loss.item():.4e}', gn=f'{grad_norm:.4e}')
             
+            # 完全保留原版的中间状态保存逻辑 (仅在总进度的 10% 节点触发，不影响总体速度)
             if (step + 1) % max(args.num_steps / 10, 1) == 0:
-                input_vector_cpu_detached = utils.gen_invert_vector(
-                    attack_type=args.attack, 
-                    optimized_var=rweight.detach(), 
-                    opt_weight_matrix=opt_weight_matrix.detach() if args.attack in ['tbs', 'ts'] else None,
-                    change_var_fn=change_var_fn,
-                    fn_multiplier=fn_multiplier).cpu()
-                recovered_ids = utils.check_results(input_vector_cpu_detached, embedding_cpu_weight)
-                recovered_text = tokenizer.batch_decode(recovered_ids)
-                torch.save({'invert_vector':input_vector_cpu_detached, 'invert_ids':recovered_ids, 'invert_text': recovered_text, 'rweight': rweight.detach().cpu() }, os.path.join(checkpoint_savepath, f'invert-{step+1}.pt'))
-            
-            t.set_postfix(loss=f'{rec_loss.item():.4e}', gn=f'{grad_norm:.4e}', time=f'{time.time()-t1:.2e}')
+                with torch.no_grad():
+                    input_vector_cpu_detached = utils.gen_invert_vector(
+                        attack_type=args.attack, 
+                        optimized_var=best_rweight_gpu, 
+                        opt_weight_matrix=opt_weight_matrix.detach() if args.attack in ['tbs', 'ts'] else None,
+                        change_var_fn=change_var_fn,
+                        fn_multiplier=fn_multiplier).cpu()
+                    recovered_ids = utils.check_results(input_vector_cpu_detached, embedding_cpu_weight)
+                    recovered_text = tokenizer.batch_decode(recovered_ids)
+                    torch.save({'invert_vector':input_vector_cpu_detached, 'invert_ids':recovered_ids, 'invert_text': recovered_text, 'rweight': best_rweight_gpu.detach().cpu() }, os.path.join(checkpoint_savepath, f'invert-{step+1}.pt'))
 
     ########################################
     # Evaluation and Padding Normalization #
     ########################################
+    # 提取 GPU 上最终确认的最佳状态
+    input_vector_cpu_detached_best = utils.gen_invert_vector(
+        attack_type=args.attack, 
+        optimized_var=best_rweight_gpu, 
+        opt_weight_matrix=opt_weight_matrix.detach() if args.attack in ['tbs', 'ts'] else None,
+        change_var_fn=change_var_fn,
+        fn_multiplier=fn_multiplier).cpu()
+        
     recovered_ids = utils.check_results(input_vector_cpu_detached_best, embedding_cpu_weight)
     
     cleaned_predictions_ids = []
@@ -401,13 +415,15 @@ def main():
         if tokenizer.pad_token_id in pred_ids_list:
             pred_ids_list = pred_ids_list[:pred_ids_list.index(tokenizer.pad_token_id)]
         cleaned_predictions_ids.append(pred_ids_list)
-        cleaned_predictions_str.append(tokenizer.decode(pred_ids_list, skip_special_tokens=True))
+        # 💡 [医学清洗补丁] 移除 <|endoftext|> 
+        cleaned_predictions_str.append(tokenizer.decode(pred_ids_list, skip_special_tokens=True).replace("<|endoftext|>", "").strip())
         
         ref_ids_list = inputdict['input_ids'][i].tolist()
         if tokenizer.pad_token_id in ref_ids_list:
             ref_ids_list = ref_ids_list[:ref_ids_list.index(tokenizer.pad_token_id)]
         cleaned_references_ids.append(ref_ids_list)
-        cleaned_references_str.append(tokenizer.decode(ref_ids_list, skip_special_tokens=True))
+        # 💡 [医学清洗补丁] 移除 <|endoftext|> 
+        cleaned_references_str.append(tokenizer.decode(ref_ids_list, skip_special_tokens=True).replace("<|endoftext|>", "").strip())
 
     logger.info("=== Output Evaluation ===")
     logger.info(f"Target Text Sample: {cleaned_references_str[0]}")
@@ -421,26 +437,27 @@ def main():
         references_str=cleaned_references_str
     )
     
-    # 彻底阻断 JSON 序列化崩溃：主动拆解所有 NumPy 和 Tensor 类型
     for k, v in metrics.items():
-        if hasattr(v, 'item'):
-            metrics[k] = v.item()
+        if hasattr(v, 'item'): metrics[k] = v.item()
         else:
-            try:
-                metrics[k] = float(v)
-            except (TypeError, ValueError):
-                pass
+            try: metrics[k] = float(v)
+            except (TypeError, ValueError): pass
     
     logger.info(f"Metrics Report: \n{json.dumps(metrics, indent=4)}")
 
+    # 统一把显存里的 loss 提回 CPU
+    losses_cpu = torch.stack(losses).cpu()
+
     torch.save({
-        'L': torch.tensor(losses), 
+        'L': losses_cpu, 
         'invert_vector': input_vector_cpu_detached_best, 
         'invert_ids': recovered_ids, 
         'invert_text': cleaned_predictions_str, 
-        'rweight': rweight.detach().cpu(),
+        'rweight': best_rweight_gpu.detach().cpu(),
         'evaluation_metrics': metrics
     }, os.path.join(savepath, 'invert-best.pt'))
+    
+    print(f"✅ 攻击完成！结果保存在 {savepath}/invert-best.pt")
 
 if __name__ == "__main__":
     main()

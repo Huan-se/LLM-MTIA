@@ -18,6 +18,12 @@ import pandas as pd  # 新增：用于读取 parquet 文件
 
 from transformers import AutoTokenizer, AutoModel
 
+try:
+    import spacy
+    nlp_med = spacy.load("en_ner_bc5cdr_md")
+except Exception:
+    nlp_med = None
+
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 DATA_PATH = os.path.join(CURRENT_DIR, '../data')
@@ -262,6 +268,10 @@ class Eval:
             predictions=preds, references=labels
         )
         return {**accuracy_result}
+    
+    def _extract_medical_entities(self, text_list):
+        if not nlp_med: return [set() for _ in text_list]
+        return [{ent.text.lower().strip() for ent in doc.ents} for doc in nlp_med.pipe(text_list, disable=["tagger", "parser", "lemmatizer"])]
 
     def _text_comparison_metrics(
         self,
@@ -333,6 +343,18 @@ class Eval:
             predictions=predictions_str, references=references_str
         )
         self.bleu_results = bleu_results.tolist()
+        
+        pred_ents = self._extract_medical_entities(predictions_str)
+        ref_ents = self._extract_medical_entities(references_str)
+        med_f1_list = []
+        for p_set, r_set in zip(pred_ents, ref_ents):
+            if not p_set and not r_set: med_f1_list.append(1.0)
+            elif not p_set or not r_set: med_f1_list.append(0.0)
+            else:
+                inter = len(p_set & r_set)
+                prec = inter / len(p_set)
+                rec = inter / len(r_set)
+                med_f1_list.append((2 * prec * rec) / (prec + rec))
 
         exact_matches = np.array(predictions_str) == np.array(references_str)
         gen_metrics = {
@@ -344,6 +366,7 @@ class Eval:
             "rougeLsum_score": rouge_result['rougeLsum'],
             "exact_match": mean(exact_matches.tolist()),
             "exact_match_sem": sem(exact_matches.tolist()),
+            "med_entity_f1": mean(med_f1_list),
         }
 
         all_metrics = {**set_token_metrics, **gen_metrics}

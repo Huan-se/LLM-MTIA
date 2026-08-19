@@ -6,8 +6,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import re
 from transformers import AutoTokenizer
-import utils
 
+# 💡 [修改] 导入我们刚刚为医学数据适配的 attack_utils
+import utils
 
 def main_extraction_and_plot():
     # ==========================================
@@ -15,19 +16,20 @@ def main_extraction_and_plot():
     # ==========================================
     print("=== 开始提取并解析实验数据 ===")
     
-    results_dir = "../resultsx"
+    # 💡 [修改] 结果目录指向刚才 batch_medical_attack.sh 生成的医学攻击结果目录
+    results_dir = "./outputs/attack_results_med"
     if not os.path.exists(results_dir):
-        results_dir = "./resultsx"
-        if not os.path.exists(results_dir):
-            print("未找到结果目录，请检查执行路径是否正确。")
-            return
+        print(f"未找到结果目录 {results_dir}，请检查执行路径是否正确。")
+        return
 
     extracted_data = []
-    hp_pattern = re.compile(r'_l(\d+)_([a-zA-Z]+)_lr([0-9\.]+)_wdm([0-9\.]+)(?:_wl1([0-9\.]+))?_ep([0-9]+)_([a-zA-Z]+)(?:_cv([a-zA-Z0-9\-]+))?_in([a-zA-Z0-9_]+)$')
+    
+    # 💡 [修改] 适配 run_attack.py 和 batch_medical_attack.sh 生成的文件夹命名规范
+    # 示例: eval_transfer_19695-19700_Transfer_Qwen2.5-1.5B-Base_l4_tbs_lr0.00005_wdm100_wl10.0_ep200000_cos_cvatan-5_inrandn
+    hp_pattern = re.compile(r'Transfer_(.*?)_l(\d+)_([a-zA-Z]+)_lr([0-9\.]+)_wdm([0-9\.]+)_wl1([0-9\.]+)_ep([0-9]+)_([a-zA-Z]+)_cv([a-zA-Z0-9\-]+)_in([a-zA-Z0-9_]+)')
 
     for exp_folder in os.listdir(results_dir):
-        if exp_folder == "batch_logs":
-            continue
+        if exp_folder == "batch_logs": continue
             
         exp_path = os.path.join(results_dir, exp_folder)
         if not os.path.isdir(exp_path): continue
@@ -39,53 +41,23 @@ def main_extraction_and_plot():
         
         match = hp_pattern.search(exp_folder)
         if match:
-            layer = match.group(1)
-            method = match.group(2).upper()
-            lr_val = match.group(3)
-            w_dm = match.group(4)
-            w_l1 = match.group(5) if match.group(5) else "0.0"
-            steps = match.group(6)
-            loss_type = match.group(7)
-            changevar = match.group(8) if match.group(8) else "atan-5"
-            init_type = match.group(9)
-            
+            surrogate_model, layer, method, lr_val, w_dm, w_l1, steps, loss_type, changevar, init_type = match.groups()
             lr = float(lr_val)
             
-            # 提取所属 Model Family (大类) 与完整 Setting 标签
-            if "Transfer_" in exp_folder or "eval_transfer_" in exp_folder:
-                attack_type = "Transfer"
-                surr_match = re.search(r'Transfer_(.*?)_l\d+_', exp_folder)
-                proxy_name = surr_match.group(1) if surr_match else "Proxy"
-                if "model" in proxy_name:
-                    proxy_short = "model"
-                else:
-                    proxy_short = "_".join(proxy_name.split('_')[1:3]) if '_' in proxy_name else proxy_name[:10]
-                model_family = f"[{attack_type}-{proxy_short}]"
-                setting_label = f"{model_family} lr{lr_val}_wdm{w_dm}_ep{steps}_{init_type}"
-            elif "Base" in exp_folder or "base" in exp_folder:
-                attack_type = "Base-prefix"
-                model_family = "[Base-prefix]"
-                setting_label = f"{model_family} lr{lr_val}_wdm{w_dm}_ep{steps}_{init_type}"
-            else:
-                attack_type = "Oracle"
-                model_family = "[Oracle]"
-                setting_label = f"{model_family} lr{lr_val}_wdm{w_dm}_ep{steps}_{init_type}"
-                
-        elif "_vs_" in exp_folder:
-            try:
-                parts = exp_folder.split('_vs_')
-                remainder = parts[1]
-                layer_idx = remainder.find('_layer')
-                model_family = "[Legacy]"
-                setting_label = f"[Legacy] {remainder[:layer_idx] if layer_idx != -1 else remainder}"
-                lr = float(remainder.split('_lr')[-1])
-                lr_val = str(lr)
-            except:
-                continue
+            # 为了图表简洁，简化代理模型的名称
+            proxy_short = surrogate_model
+            if "Oracle" in proxy_short: proxy_short = "Oracle"
+            elif "Base" in proxy_short: proxy_short = "Base"
+            elif "Align" in proxy_short: proxy_short = proxy_short.split('_')[1] # 提取 0-1-0-0
+
+            attack_type = "Oracle" if proxy_short == "Oracle" else "Transfer"
+            model_family = f"[{proxy_short}]"
+            # Setting 标签中体现核心扰动参数
+            setting_label = f"{model_family} lr{lr_val}_wdm{w_dm}_ep{steps}"
         else:
-            print(f"跳过无法解析的文件夹: {exp_folder}")
             continue
 
+        # 进入内部子文件夹 (如 19695:19700-tbs-...)
         for sub_folder in os.listdir(exp_path):
             sub_path = os.path.join(exp_path, sub_folder)
             if not os.path.isdir(sub_path): continue
@@ -105,6 +77,7 @@ def main_extraction_and_plot():
                         "BLEU Score": metrics.get("bleu_score", 0.0),
                         "ROUGE-L": metrics.get("rougeL_score", 0.0),
                         "Token F1": metrics.get("token_set_f1", 0.0),
+                        "Med Entity F1": metrics.get("med_entity_f1", 0.0), # 💡 [修改] 提取医学实体 F1
                         "Final Loss": data['L'][-1].item() if 'L' in data and len(data['L']) > 0 else None
                     }
                     extracted_data.append(row)
@@ -117,22 +90,22 @@ def main_extraction_and_plot():
 
     df = pd.DataFrame(extracted_data)
     
-    # 仅针对同名配置的多次重复测试取均值，保留不同超参配置为独立行
     agg_funcs = {
         'BLEU Score': 'mean',
         'ROUGE-L': 'mean',
         'Token F1': 'mean',
+        'Med Entity F1': 'mean', # 💡 [修改] 参与聚合
         'Final Loss': 'mean'
     }
     df_aggregated = df.groupby(['Model Family', 'Attack Class', 'Setting (Layer-Method-Reg)', 'LR_str'], as_index=False).agg(agg_funcs)
     df_aggregated['LR'] = df_aggregated['LR_str'].astype(float)
 
-    # 核心：按 Model Family 归类排序，使同大类的项紧密排列
     df_aggregated = df_aggregated.sort_values(by=["Model Family", "LR", "Setting (Layer-Method-Reg)"]).reset_index(drop=True)
-    metric_cols = ['BLEU Score', 'ROUGE-L', 'Token F1', 'Final Loss']
+    metric_cols = ['BLEU Score', 'ROUGE-L', 'Token F1', 'Med Entity F1', 'Final Loss']
     df_rounded = df_aggregated.copy()
     df_rounded[metric_cols] = df_aggregated[metric_cols].round(4)
     
+    # 💡 [修改] 加入 Medical Entity F1 的显示顺序
     output_column_order = [
         "Model Family",
         "Setting (Layer-Method-Reg)",
@@ -140,11 +113,12 @@ def main_extraction_and_plot():
         "BLEU Score",
         "ROUGE-L",
         "Token F1",
+        "Med Entity F1",
         "Final Loss"
     ]
     df_display = df_rounded[output_column_order].copy()
 
-    print("\n=== MTIA 综合攻击结果汇总 (Markdown) ===\n")
+    print("\n=== MTIA 医学攻击结果汇总 (Markdown) ===\n")
     try:
         print(df_display.to_markdown(index=False))
     except ImportError:
@@ -155,26 +129,12 @@ def main_extraction_and_plot():
     print(f"\n✅ 数据已提取并保存至: {os.path.abspath(csv_path)}")
 
     # ====================================================================
-    # 第二阶段：同族色系渐变映射 (Family Color Palette + Texture Generation)
+    # 第二阶段：同族色系渐变映射 (可视化拓展为 4 栏)
     # ====================================================================
     print("\n=== 开始构建同族色系映射与渲染可视化图表 ===")
     
-    # 1. 基础族系主色调库
-    base_color_pool = [
-        '#1f77b4',  # 蓝色系 (Transfer-1)
-        '#ff7f0e',  # 橙色系 (Transfer-2)
-        '#9467bd',  # 紫色系 (Transfer-3)
-        '#d62728',  # 红色系 (Transfer-4)
-        '#8c564b',  # 棕色系
-        '#e377c2',  # 粉色系
-        '#17becf',  # 青蓝系
-    ]
-    
-    # 特别指定具有基准意义的模型主色
-    special_family_hues = {
-        '[Oracle]': '#2ca02c',       # 翡翠绿系 (上限参考)
-        '[Base-prefix]': '#7f7f7f',  # 经典灰系 (基准参考)
-    }
+    base_color_pool = ['#1f77b4', '#ff7f0e', '#9467bd', '#d62728', '#8c564b', '#e377c2', '#17becf']
+    special_family_hues = {'[Oracle]': '#2ca02c', '[Base]': '#7f7f7f'}
 
     unique_families = list(df_display['Model Family'].unique())
     palette_dict = {}
@@ -183,31 +143,26 @@ def main_extraction_and_plot():
 
     color_idx = 0
     for family in unique_families:
-        # 获取属于该 Family 的所有独立 Setting 配置
         family_settings = list(df_display[df_display['Model Family'] == family]['Setting (Layer-Method-Reg)'].unique())
         n_sub = len(family_settings)
 
-        # 确定大族的主色
         if family in special_family_hues:
             base_hue = special_family_hues[family]
         else:
             base_hue = base_color_pool[color_idx % len(base_color_pool)]
             color_idx += 1
 
-        # 自动生成同族深浅渐变色阶（避开过浅发白的颜色）
-        if n_sub == 1:
-            shades = [base_hue]
+        if n_sub == 1: shades = [base_hue]
         else:
             cmap = sns.light_palette(base_hue, n_colors=n_sub + 2, input='hex')
             shades = [cmap[i] for i in range(2, n_sub + 2)]
 
-        # 赋予组内每个设置：对应的渐变色 + 区分性纹理
         for idx, setting in enumerate(family_settings):
             palette_dict[setting] = shades[idx]
             hatch_dict[setting] = hatch_pool[idx % len(hatch_pool)]
 
-    # 2. 数据重塑为长格式 (3栏指标)
-    target_metrics = ['BLEU Score', 'ROUGE-L', 'Token F1']
+    # 💡 [修改] 追加 Med Entity F1
+    target_metrics = ['BLEU Score', 'ROUGE-L', 'Token F1', 'Med Entity F1']
     df_melt = pd.melt(
         df_display, 
         id_vars=['Model Family', 'Setting (Layer-Method-Reg)', 'LR'],
@@ -216,11 +171,11 @@ def main_extraction_and_plot():
         value_name='Value'
     )
 
-    metric_map = {'BLEU Score': 'BLEU', 'ROUGE-L': 'ROUGE-L', 'Token F1': 'F1'}
+    metric_map = {'BLEU Score': 'BLEU', 'ROUGE-L': 'ROUGE-L', 'Token F1': 'F1', 'Med Entity F1': 'Med_F1'}
     df_melt['Metric'] = df_melt['Metric'].map(metric_map)
-    df_melt.loc[df_melt['Metric'] == 'F1', 'Value'] *= 100
+    # 将 F1 指标拉伸到百分制
+    df_melt.loc[df_melt['Metric'].isin(['F1', 'Med_F1']), 'Value'] *= 100
 
-    # 3. 开始 Seaborn 画图
     sns.set_theme(style="whitegrid", font="sans-serif")
     all_ordered_settings = list(df_display['Setting (Layer-Method-Reg)'].unique())
 
@@ -230,23 +185,22 @@ def main_extraction_and_plot():
         data=df_melt, 
         col='Metric', 
         hue='Setting (Layer-Method-Reg)',
-        hue_order=all_ordered_settings,  # 确保同组配置在柱状图中按顺序排列
-        palette=palette_dict,            # 应用同族色系映射
+        hue_order=all_ordered_settings,  
+        palette=palette_dict,            
         kind='bar', 
         sharey=False, 
         height=4.6, 
-        aspect=1.2,
+        aspect=1.2, # 微调长宽比适应 4 栏
         legend_out=True
     )
     
     g.set_axis_labels("Learning Rate (LR)", "Metric Score")
     
-    sub_titles = ['BLEU Score', 'ROUGE-L Score', 'Token F1 (%)']
+    sub_titles = ['BLEU Score', 'ROUGE-L Score', 'Token F1 (%)', 'Medical Entity F1 (%)']
     for ax, title in zip(g.axes.flat, sub_titles):
         ax.set_title(title, fontsize=12, fontweight='bold')
         ax.tick_params(labelsize=10)
 
-    # 4. 精准为各个容器添加对应的组内纹理（Hatch）
     for ax in g.axes.flat:
         for container, setting in zip(ax.containers, all_ordered_settings):
             hatch_pat = hatch_dict.get(setting, '')
@@ -255,7 +209,6 @@ def main_extraction_and_plot():
                 bar.set_edgecolor('#222222')
                 bar.set_linewidth(0.5)
 
-    # 5. 美化图例
     if g._legend:
         g._legend.set_title("Experimental Setting (Grouped by Model)")
         plt.setp(g._legend.get_title(), fontsize=10, fontweight='bold')
@@ -265,23 +218,23 @@ def main_extraction_and_plot():
     
     plot_path = os.path.join(results_dir, "mtia_search_comparison_plot.png")
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-    print(f"✅ 绘图完成！同族分色渐变图表已保存为: {os.path.abspath(plot_path)}")
+    print(f"✅ 绘图完成！同族分色渐变 4 栏图表已保存为: {os.path.abspath(plot_path)}")
 
 
 def main_text_report():
+    # ==========================================
+    # 第三阶段：文本输入与逆向输入视觉对比报告
+    # ==========================================
     print("\n=== 开始生成输入与逆向输入视觉对比报告 ===")
-    results_dir = "../resultsx"
-    if not os.path.exists(results_dir):
-        results_dir = "./resultsx"
-        if not os.path.exists(results_dir): return
+    results_dir = "./outputs/attack_results_med"
+    if not os.path.exists(results_dir): return
 
     dataset_cache = {}
     tokenizer_cache = {}
-    report_lines = ["# MTIA 综合攻击 (Oracle & Transfer) 对比报告\n\n"]
+    report_lines = ["# 医学黑盒反演攻击 (Medical MTIA) 视觉对比报告\n\n"]
 
     for exp_folder in sorted(os.listdir(results_dir)):
-        if exp_folder == "batch_logs":
-            continue
+        if exp_folder == "batch_logs": continue
             
         exp_path = os.path.join(results_dir, exp_folder)
         if not os.path.isdir(exp_path): continue
@@ -314,17 +267,17 @@ def main_text_report():
                         tokenizer_cache[target_model] = AutoTokenizer.from_pretrained(llm_path)
                         
                 tokenizer = tokenizer_cache[target_model]
-                if tokenizer.pad_token is None:
-                    tokenizer.pad_token = tokenizer.eos_token
+                if tokenizer.pad_token is None: tokenizer.pad_token = tokenizer.eos_token
 
                 if dataset_name not in dataset_cache:
                     raw_texts = utils.get_list_invert_text(dataset_name)
-                    sorted_texts = sorted(raw_texts, key=lambda x: len(tokenizer.encode(x, add_special_tokens=False)), reverse=True)
+                    # 💡 安全处理：避免数据集越界错误
+                    sorted_texts = raw_texts
                     dataset_cache[dataset_name] = sorted_texts
 
                 try:
                     start, end = map(int, data_range.split(':'))
-                    original_texts = dataset_cache[dataset_name][start:end]
+                    original_texts = dataset_cache[dataset_name][start:min(end, len(dataset_cache[dataset_name]))]
                 except Exception:
                     continue
 
@@ -343,15 +296,17 @@ def main_text_report():
 
                 report_lines.append(f"## 实验配置组: `{exp_folder}`")
                 report_lines.append(f"**攻击场景**: {attack_context}")
-                report_lines.append(f"> **范围**: {data_range} | **F1**: {metrics.get('token_set_f1', 0)*100:.2f}% | **BLEU**: {metrics.get('bleu_score', 0):.4f}\n")
+                # 💡 [修改] 在报告说明中加入 Med Entity F1
+                report_lines.append(f"> **范围**: {data_range} | **Med Entity F1**: {metrics.get('med_entity_f1', 0)*100:.2f}% | **Token F1**: {metrics.get('token_set_f1', 0)*100:.2f}% | **BLEU**: {metrics.get('bleu_score', 0):.4f}\n")
 
                 for i in range(len(true_references)):
-                    orig = true_references[i]
-                    inv = invert_texts[i] if i < len(invert_texts) else "N/A"
+                    # 💡 [修改] 在文本视觉展示时彻底清除医学模板带来的 <|endoftext|> 脏字符
+                    orig = true_references[i].replace("<|endoftext|>", "").strip()
+                    inv = invert_texts[i].replace("<|endoftext|>", "").strip() if i < len(invert_texts) else "N/A"
 
                     report_lines.append(f"### 样本 {start + i}")
-                    report_lines.append("**[Ground Truth - 原始真实输入]**\n```text\n" + orig + "\n```")
-                    report_lines.append("**[Inverted Text - 逆向恢复输入]**\n```text\n" + inv + "\n```\n---\n")
+                    report_lines.append("**[Ground Truth - 原始患者提问与诊断]**\n```text\n" + orig + "\n```")
+                    report_lines.append("**[Inverted Text - 黑盒反演重构输入]**\n```text\n" + inv + "\n```\n---\n")
 
     report_path = os.path.join(results_dir, "text_search_comparison_report.md")
     with open(report_path, "w", encoding="utf-8") as f:
