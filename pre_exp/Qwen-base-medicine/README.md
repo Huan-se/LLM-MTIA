@@ -16,7 +16,7 @@ python prepare_medical_data.py
 ./run_finetuning.sh 1 0
 
 # 2. 训练攻击者代理基线模型 Baseline
-./run_finetuning.sh 2 0
+./run_finetuning.sh 2 1
 ```
 
 ### Step 3: 单独运行评估 (Sanity Check)

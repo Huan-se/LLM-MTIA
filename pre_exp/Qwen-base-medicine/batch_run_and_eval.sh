@@ -3,18 +3,27 @@
 # ==========================================
 # 1. 显卡与搜参任务池配置
 # ==========================================
-GPUS=(0 1 2 3) 
+GPUS=(0 4 5) 
 NUM_GPUS=${#GPUS[@]}
 
 # "alpha gamma lam beta start_mode"
+# CONFIGS=(
+#     "0.4 0.1 0.0 0.0 splicedbase"
+#     "0.1 0.4 0.0 0.0 splicedbase"
+#     "0.2 0.2 0.0 0.0 splicedbase"
+#     "0.0 1.0 0.0 0.0 splicedbase"
+#     "0.2 0.1 0.0005 10.0 splicedbase"
+#     "0.0 0.1 0.0 5.0 splicedbase"
+#     "0.8 0.1 0.0 0.0 splicedbase"
+# )
 CONFIGS=(
-    "0.4 0.1 0.0 0.0 splicedbase"
-    "0.1 0.4 0.0 0.0 splicedbase"
-    "0.2 0.2 0.0 0.0 splicedbase"
-    "0.0 1.0 0.0 0.0 splicedbase"
-    "0.2 0.1 0.0005 10.0 splicedbase"
-    "0.0 0.1 0.0 5.0 splicedbase"
-    "0.8 0.1 0.0 0.0 splicedbase"
+    "0.4 0.1 0.0 0.0 phase2"
+    "0.1 0.4 0.0 0.0 phase2"
+    "0.2 0.2 0.0 0.0 phase2"
+    "0.0 1.0 0.0 0.0 phase2"
+    "0.2 0.1 0.0005 10.0 phase2"
+    "0.0 0.1 0.0 5.0 phase2"
+    "0.8 0.1 0.0 0.0 phase2"
 )
 
 # 创建所有必要目录
@@ -61,6 +70,7 @@ run_pipeline_task() {
             --oracle_model_path "$ORACLE_MODEL" \
             --dataset_path "$DATASET" \
             --output_json "$json_out" \
+            --test_size 50 \
             --tasks generation feature
         
         echo "✅ [GPU $gpu] 任务 $exp_name 全部流水线完成！"

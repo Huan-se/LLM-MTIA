@@ -36,6 +36,7 @@ case $PHASE in
             --oracle_model_path "$ORACLE_MODEL" \
             --dataset_path "$DATASET" \
             --output_json "./outputs/eval_results_medical/base_spliced.json" \
+            --test_size 100\
             --tasks generation feature
         ;;
     1)
@@ -46,6 +47,7 @@ case $PHASE in
             --oracle_model_path "$ORACLE_MODEL" \
             --dataset_path "$DATASET" \
             --output_json "./outputs/eval_results_medical/oracle.json" \
+            --test_size 100\
             --tasks generation feature
         ;;
     2)
@@ -56,6 +58,7 @@ case $PHASE in
             --oracle_model_path "$ORACLE_MODEL" \
             --dataset_path "$DATASET" \
             --output_json "./outputs/eval_results_medical/baseline.json" \
+            --test_size 100\
             --tasks generation feature
         ;;
     3)
@@ -66,6 +69,7 @@ case $PHASE in
             --oracle_model_path "$ORACLE_MODEL" \
             --dataset_path "$DATASET" \
             --output_json "./outputs/eval_results_medical/proposed.json" \
+            --test_size 100\
             --tasks generation feature
         ;;
     *)
